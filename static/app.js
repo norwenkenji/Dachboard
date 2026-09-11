@@ -31,6 +31,7 @@ en: {
   logs: "Logs", restart: "Restart", stop: "Stop", start: "Start",
   run_t: "Presets", history_t: "History", history_empty: "empty",
   term_t: "Shell", term_starting: "Starting shell…",
+  reconnect: "Reconnect", new_shell: "New shell", new_shell_q: "Kill this shell and start fresh?",
   ctor_t: "Command constructor", ph_name: "Name", ph_runas: "run_as: owner / self / user",
   ph_allow: "Allowed user ids (* = all)", ph_argv: "One argument per line. No shell, ever.",
   add_cmd: "Add command", del_cmd_q: "Delete command?",
@@ -77,6 +78,7 @@ ru: {
   logs: "Логи", restart: "Рестарт", stop: "Стоп", start: "Старт",
   run_t: "Пресеты", history_t: "История", history_empty: "пусто",
   term_t: "Шелл", term_starting: "Запускаю шелл…",
+  reconnect: "Переподключить", new_shell: "Новый шелл", new_shell_q: "Убить шелл и начать заново?",
   ctor_t: "Конструктор команд", ph_name: "Название", ph_runas: "run_as: owner / self / user",
   ph_allow: "ID допущенных (* = все)", ph_argv: "По одному аргументу на строку. Шелла нет и не будет.",
   add_cmd: "Добавить", del_cmd_q: "Удалить команду?",
@@ -462,17 +464,34 @@ async function vConsole() {
     }
   }
   if (canTerm) {
-    try {
-      const r = await api("/api/terminal/ensure", { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: "{}" });
-      const label = r.slot === "root" ? "system · root" : r.slot;
+    const paintTerm = (slot, port) => {
+      const label = slot === "root" ? "system · root" : slot;
       $("#term-slot").innerHTML =
-        `<p class="dim"><span class="mono">${esc(label)}</span> · 127.0.0.1:${r.port}</p>
-         <iframe id="term-frame" class="term" src="/term/${esc(r.slot)}/" title="terminal"></iframe>`;
-      // same-origin iframe: restyle ttyd's native scrollbar + bg to match
-      $("#term-frame").onload = () => {
+        `<div class="termbar"><span class="mono">${esc(label)} · 127.0.0.1:${port}</span>
+         <span class="sp"></span>
+         <button id="t-recon" class="ghost" title="${t("reconnect")}">${ic("refresh")}${t("reconnect")}</button>
+         <button id="t-new" class="ghost danger" title="${t("new_shell")}">${ic("plus")}${t("new_shell")}</button></div>
+         <iframe id="term-frame" class="term" src="/term/${esc(slot)}/" title="terminal"></iframe>`;
+      styleTermFrame();
+      $("#t-recon").onclick = () => {
+        // reattach to the SAME shell session (tab switches never kill it)
+        $("#term-frame").src = "/term/" + encodeURIComponent(slot) + "/";
+        styleTermFrame();
+      };
+      $("#t-new").onclick = async () => {
+        if (!confirm(t("new_shell_q"))) return;
+        await api("/api/terminal/restart", { method: "POST",
+          headers: { "Content-Type": "application/json" }, body: "{}" });
+        $("#term-frame").src = "/term/" + encodeURIComponent(slot) + "/";
+        styleTermFrame();
+      };
+    };
+    const styleTermFrame = () => {
+      const f = $("#term-frame");
+      if (!f) return;
+      f.onload = () => {
         try {
-          const d = $("#term-frame").contentDocument;
+          const d = f.contentDocument;
           const s = d.createElement("style");
           s.textContent = ".xterm-viewport{scrollbar-width:thin;scrollbar-color:#2e3238 transparent}"
             + ".xterm-viewport::-webkit-scrollbar{width:10px;height:10px}"
@@ -483,10 +502,14 @@ async function vConsole() {
           d.head.appendChild(s);
         } catch (e) { /* cross-origin: leave default */ }
       };
+    };
+    try {
+      const r = await api("/api/terminal/ensure", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: "{}" });
+      paintTerm(r.slot, r.port);
     } catch (e) {
       $("#term-slot").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
     }
-    return;
   }
 }
 

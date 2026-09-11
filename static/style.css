@@ -167,7 +167,15 @@ label.ck { display: inline-flex; gap: 7px; align-items: center; margin: 4px 14px
 label.ck input { width: auto; margin: 0; accent-color: var(--acc); }
 .path { font-family: var(--mono); font-size: 13px; }
 iframe.term { width: 100%; height: 68vh; min-height: 420px;
-  border: 1px solid var(--line); border-radius: 10px; background: #000; }
+  border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; background: #000; }
+/* greenish terminal toolbar so it never blends into the page */
+.termbar { display: flex; align-items: center; gap: 8px;
+  background: #14231a;
+  border: 1px solid #2a4433; border-bottom: 0; border-radius: 10px 10px 0 0;
+  padding: 7px 12px; font-size: 12.5px; color: var(--dim); }
+.termbar .mono { color: var(--acc); }
+.termbar .sp { flex: 1; }
+.termbar button { margin: 0; padding: 4px 10px; font-size: 12px; }
 .url-big { font-family: var(--mono); font-size: 15px; word-break: break-all; }
 
 @media (max-width: 640px) {

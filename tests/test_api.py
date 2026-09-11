@@ -214,6 +214,13 @@ def test_admin_root_files_and_terminal(clients):
     r = a.post("/api/terminal/ensure", json={},
                headers={"X-CSRF-Token": csrf})
     assert r.status_code not in (401, 403)
+    # restart endpoint: same slot rules
+    r = a.post("/api/terminal/restart", json={},
+               headers={"X-CSRF-Token": csrf})
+    assert r.status_code not in (401, 403)
+    r = clients["bob"].post("/api/terminal/restart", json={"slot": "root"},
+                            headers={"X-CSRF-Token": bcsrf})
+    assert r.status_code == 403
 
 
 def test_auth_check_headers(clients):

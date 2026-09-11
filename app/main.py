@@ -739,6 +739,27 @@ async def terminal_ensure(request: Request, dach_sid: str | None = Cookie(defaul
     return {"slot": slot, "port": _slot_port(slot)}
 
 
+@app.post("/api/terminal/restart")
+async def terminal_restart(request: Request, dach_sid: str | None = Cookie(default=None)):
+    """Kill the shell and start fresh (new session). Same slot rules as ensure."""
+    u = await require("terminal", dach_sid)
+    check_csrf(request, dach_sid)
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    slot = body.get("slot") or u["slot"] or ("root" if u["is_admin"] else None)
+    if slot == "root" and not u["is_admin"]:
+        raise HTTPException(403, "admin only")
+    if not u["is_admin"] and slot != (u["slot"] or ""):
+        raise HTTPException(403, "not yours")
+    if not slot:
+        raise HTTPException(400, "no slot")
+    unit = "dach-ttyd-root.service" if slot == "root" else f"dach-ttyd-{slot}.service"
+    code, out = await asyncio.to_thread(
+        R.run_as, ["systemctl", "restart", unit], None, 30)
+    if code != 0:
+        raise HTTPException(500, out[-500:])
+    return {"slot": slot, "port": _slot_port(slot)}
+
+
 # ---------- tunnel ----------
 
 @app.get("/api/tunnel")
