@@ -45,16 +45,20 @@ LOGIN_FAILS: dict[str, list[float]] = {}
 
 def secret() -> str:
     p = Path(SECRET_FILE)
-    if p.exists():
-        return p.read_text().strip()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    s = secrets.token_hex(32)
-    p.write_text(s)
     try:
-        p.chmod(0o600)
+        if p.exists():
+            return p.read_text().strip()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        s = secrets.token_hex(32)
+        p.write_text(s)
+        try:
+            p.chmod(0o600)
+        except OSError:
+            pass
+        return s
     except OSError:
-        pass
-    return s
+        # read-only checkout (tests, audits): ephemeral, sessions stay in DB
+        return secrets.token_hex(32)
 
 
 SECRET = secret()

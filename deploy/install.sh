@@ -9,6 +9,15 @@ PORT_BASE=7681
 
 echo "== dachboard install =="
 
+# --- preflight ---
+[ "$(id -u)" = "0" ] || { echo "run as root"; exit 1; }
+command -v python3 >/dev/null || { echo "need python3"; exit 1; }
+if ! python3 -c "import sys; assert sys.version_info >= (3,10)" 2>/dev/null; then
+  echo "need python >= 3.10"; exit 1
+fi
+command -v docker >/dev/null || echo "note: no docker — containers page will be empty"
+command -v nginx >/dev/null || echo "note: no nginx — install it for /term/ gating, else dashboard serves directly"
+
 # --- packages ---
 apt-get update -qq
 apt-get install -y -qq python3 python3-venv nginx curl unzip quota 2>/dev/null || \
@@ -79,7 +88,8 @@ EOF
 nginx -t && systemctl reload nginx
 
 echo "== done =="
-echo "1. create admin:  cd /opt/dachboard && sudo .venv/bin/python -m app.main create-admin"
-echo "2. edit /opt/dachboard/config.yaml (tunnel provider, ports)"
-echo "3. start: sudo systemctl start dachboard.service"
-echo "4. loopback check: curl http://127.0.0.1:8420/"
+echo "1. start:  sudo systemctl start dachboard.service"
+echo "2. token:  sudo journalctl -u dachboard -n 5 | grep 'SETUP TOKEN'"
+echo "3. open http://127.0.0.1:8420 (or your tunnel URL) -> first-setup card"
+echo "4. tunnel: bash deploy/tunnel-cloudflared.sh   (see TUNNEL.md for options)"
+echo "5. loopback check: curl http://127.0.0.1:8420/api/setup-needed"

@@ -15,19 +15,27 @@ Self-hosted homelab panel for your own server. One daemon, one tunnel, per-user 
 Binds to `127.0.0.1` only. Expose it via your own tunnel (Cloudflare, playit, …)
 and/or nginx. Never expose the port directly.
 
-## Quick start (server)
+## Quick start (server, Ubuntu/Debian, root, python 3.10+)
 
 ```bash
-git clone https://github.com/norwenkenji/Dachboard.git /opt/dachboard
-cd /opt/dachboard
+git clone https://github.com/norwenkenji/Dachboard.git /root/dachboard-src
+cd /root/dachboard-src
 sudo bash deploy/install.sh
-sudo python3 /opt/dachboard/app/__main__.py create-admin
-sudo systemctl enable --now dachboard.service
+sudo systemctl start dachboard.service
+# one-time setup token (burns after use):
+sudo journalctl -u dachboard -n 5 | grep "SETUP TOKEN"
+# open http://127.0.0.1:8420 → first-setup card → create admin
 ```
 
-Copy `config.example.yaml` → `/opt/dachboard/config.yaml`, edit ports/paths,
-`sudo systemctl restart dachboard.service`. Open `http://127.0.0.1:8420`
-(or your tunnel URL + `/dash/` behind the nginx snippet in `deploy/nginx/`).
+Then expose it: see [TUNNEL.md](TUNNEL.md) for free tunnel options
+(cloudflared quick/named, playit, ngrok, tailscale). The dashboard shows its
+own public URL at `GET /api/tunnel` once a provider is wired in
+`config.yaml`.
+
+Next: create users in the UI (Users tab): login + temp password + slot
+(`u-c1`…) + rights checkboxes + limits. The user sets their own password on
+first login. Hand them the tunnel URL + credentials any way you like
+(Telegram bot, QR, …) — that integration lives outside this repo.
 
 ## Layout
 
