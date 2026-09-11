@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     rights TEXT NOT NULL DEFAULT '{}',
     limits TEXT NOT NULL DEFAULT '{}',
     slot TEXT,
+    must_change_pw INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -65,6 +66,9 @@ def connect(path: str | Path) -> sqlite3.Connection:
 def init(path: str | Path) -> None:
     with closing(connect(path)) as con:
         con.executescript(SCHEMA)
+        cols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
+        if "must_change_pw" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0")
         con.commit()
 
 

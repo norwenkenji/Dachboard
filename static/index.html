@@ -7,11 +7,25 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<div id="setup" class="card hidden">
+  <h1>first setup</h1>
+  <p class="dim">one-time token from server log</p>
+  <input id="su-token" placeholder="setup token">
+  <input id="su-login" placeholder="admin login">
+  <input id="su-pass" type="password" placeholder="password 12+">
+  <button id="su-go" class="primary">create admin</button>
+  <div id="su-err" class="err"></div>
+</div>
 <div id="login" class="card hidden">
   <h1>dachboard</h1>
   <input id="li-login" placeholder="login" autocomplete="username">
   <input id="li-pass" type="password" placeholder="password" autocomplete="current-password">
   <button id="li-go">enter</button>
+  <div id="li-first" class="hidden">
+    <p class="dim">first login — set your own password</p>
+    <input id="li-new" type="password" placeholder="new password 8+">
+    <button id="li-set">set &amp; enter</button>
+  </div>
   <div id="li-err" class="err"></div>
 </div>
 <div id="app" class="hidden">

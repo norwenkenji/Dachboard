@@ -55,6 +55,15 @@ access-granter bot, but the bot lives outside this repo.
 
 ## Security model
 
+- No default credentials, nothing secret in the repo or `.env`.
+- **Bootstrap**: on first start with no admin present, the daemon generates a
+  one-time setup token (file `0600` in the data dir, also logged to journal).
+  `POST /api/setup` with that token creates the first admin and **burns** the
+  token. Afterwards the endpoint 404s. Anyone with only dashboard or limited
+  server access can't mint an admin.
+- **Pre-register**: admin creates a user with a temp password + `must_change`
+  flag. First login is rejected until the user sets their own password via
+  `POST /api/first-password`. Temp password dies after that.
 - Passwords: scrypt (stdlib). Sessions: random tokens, expiry, `HttpOnly` cookies.
 - CSRF token on all mutating requests. Login rate-limit.
 - Commands run **without shell** (`argv` arrays only), as the target Linux user

@@ -69,7 +69,7 @@ def get_user(uid: int) -> dict | None:
             return None
         return {"id": r["id"], "login": r["login"], "is_admin": bool(r["is_admin"]),
                 "rights": D.jload(r["rights"], {}), "limits": D.jload(r["limits"], {}),
-                "slot": r["slot"]}
+                "slot": r["slot"], "must_change_pw": bool(r["must_change_pw"])}
 
 
 def get_user_by_login(login: str) -> dict | None:
@@ -80,7 +80,39 @@ def get_user_by_login(login: str) -> dict | None:
         row = dict(r)
         return {"id": row["id"], "login": row["login"], "pass_hash": row["pass_hash"],
                 "is_admin": bool(row["is_admin"]), "rights": D.jload(row["rights"], {}),
-                "limits": D.jload(row["limits"], {}), "slot": row["slot"]}
+                "limits": D.jload(row["limits"], {}), "slot": row["slot"],
+                "must_change_pw": bool(row["must_change_pw"])}
+
+
+def admin_exists() -> bool:
+    with closing(D.connect(DB)) as con:
+        return con.execute("SELECT 1 FROM users WHERE is_admin=1").fetchone() is not None
+
+
+def setup_token_path() -> Path:
+    return Path(DB).parent / ".setup_token"
+
+
+def ensure_setup_token() -> str | None:
+    """First-run one-time token. Returns None when bootstrap is done."""
+    if admin_exists():
+        return None
+    p = setup_token_path()
+    if p.exists():
+        try:
+            return p.read_text().strip() or None
+        except OSError:
+            return None
+    import logging
+    tok = A.new_token()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(tok)
+    try:
+        p.chmod(0o600)
+    except OSError:
+        pass
+    logging.getLogger("dachboard").warning("SETUP TOKEN (one-time): %s", tok)
+    return tok
 
 
 async def session_user(token: str | None) -> dict | None:
@@ -130,12 +162,14 @@ def home_of(user: dict, slot: str | None = None) -> Path:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     D.init(DB)
+    ensure_setup_token()
     task = asyncio.create_task(_sampler())
     yield
     task.cancel()
 
 
 async def _sampler():
+    tick = 0
     while True:
         try:
             s = await asyncio.to_thread(M.snapshot)
@@ -150,6 +184,16 @@ async def _sampler():
                      s["load"][0]))
                 con.commit()
             D.prune_metrics(DB)
+            tick += 1
+            if tick % 10 == 0:
+                # keep tunnel_url.txt fresh for external access-granter bots
+                t = CFG.get("tunnel", {})
+                try:
+                    await asyncio.to_thread(
+                        T.current, t.get("provider", ""), t.get("args", []),
+                        int(t.get("cache_seconds", 30)), t.get("cache_file"))
+                except Exception:
+                    pass
         except Exception:
             pass
         await asyncio.sleep(30)
@@ -166,6 +210,43 @@ def index():
 
 # ---------- auth ----------
 
+@app.get("/api/setup-needed")
+async def setup_needed():
+    return {"needed": not admin_exists()}
+
+
+@app.post("/api/setup")
+async def setup(request: Request):
+    """One-time bootstrap: create first admin. Burns the token file."""
+    if admin_exists():
+        raise HTTPException(404, "already set up")
+    body = await request.json()
+    p = setup_token_path()
+    try:
+        want = p.read_text().strip()
+    except OSError:
+        want = ""
+    got = str(body.get("token", ""))
+    if not want or not secrets.compare_digest(got, want):
+        raise HTTPException(403, "bad token")
+    login = str(body.get("login", "")).strip()
+    password = str(body.get("password", ""))
+    if not login or len(login) > 32 or len(password) < 12:
+        raise HTTPException(400, "login required, password min 12")
+    with closing(D.connect(DB)) as con:
+        con.execute(
+            "INSERT INTO users(login,pass_hash,is_admin,rights,limits,created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            (login, A.hash_password(password), 1,
+             json.dumps({r: True for r in RIGHTS}), "{}", int(time.time())))
+        con.commit()
+    try:
+        p.unlink()
+    except OSError:
+        pass
+    return {"ok": True}
+
+
 @app.post("/api/login")
 async def login(request: Request, response: Response):
     body = await request.json()
@@ -178,6 +259,8 @@ async def login(request: Request, response: Response):
         fails.append(time.time())
         LOGIN_FAILS[ip] = fails
         raise HTTPException(401, "bad credentials")
+    if u.get("must_change_pw"):
+        raise HTTPException(401, {"must_change": True})
     LOGIN_FAILS.pop(ip, None)
     tok, csrf = A.new_token(), A.new_token(16)
     ttl = int(CFG.get("session_ttl_hours", 72)) * 3600
@@ -210,6 +293,48 @@ async def me(dach_sid: str | None = Cookie(default=None)):
     if not u:
         raise HTTPException(401, "no session")
     return u
+
+
+@app.post("/api/me/password")
+async def me_password(request: Request, dach_sid: str | None = Cookie(default=None)):
+    u = await session_user(dach_sid)
+    if not u:
+        raise HTTPException(401, "no session")
+    check_csrf(request, dach_sid)
+    body = await request.json()
+    with closing(D.connect(DB)) as con:
+        r = con.execute("SELECT pass_hash FROM users WHERE id=?", (u["id"],)).fetchone()
+        if not r or not A.verify_password(str(body.get("old_password", "")), r["pass_hash"]):
+            raise HTTPException(401, "bad old password")
+        new = str(body.get("new_password", ""))
+        if len(new) < 8:
+            raise HTTPException(400, "password min 8")
+        con.execute("UPDATE users SET pass_hash=?, must_change_pw=0 WHERE id=?",
+                    (A.hash_password(new), u["id"]))
+        con.commit()
+    return {"ok": True}
+
+
+@app.post("/api/first-password")
+async def first_password(request: Request):
+    """Pre-registered user sets their own password on first login. No session."""
+    body = await request.json()
+    ip = request.client.host if request.client else "?"
+    u = get_user_by_login(str(body.get("login", "")))
+    new = str(body.get("new_password", ""))
+    if (not u or not u.get("must_change_pw")
+            or not A.verify_password(str(body.get("old_password", "")), u["pass_hash"])):
+        fails = [t for t in LOGIN_FAILS.get(ip, []) if time.time() - t < 600]
+        fails.append(time.time())
+        LOGIN_FAILS[ip] = fails
+        raise HTTPException(401, "bad credentials")
+    if len(new) < 8:
+        raise HTTPException(400, "password min 8")
+    with closing(D.connect(DB)) as con:
+        con.execute("UPDATE users SET pass_hash=?, must_change_pw=0 WHERE id=?",
+                    (A.hash_password(new), u["id"]))
+        con.commit()
+    return {"ok": True}
 
 
 @app.get("/api/auth-check")
@@ -555,9 +680,11 @@ async def users_list(dach_sid: str | None = Cookie(default=None)):
     await require("users_manage", dach_sid)
     with closing(D.connect(DB)) as con:
         rows = con.execute(
-            "SELECT id,login,is_admin,rights,limits,slot,created_at FROM users ORDER BY id").fetchall()
+            "SELECT id,login,is_admin,rights,limits,slot,must_change_pw,created_at"
+            " FROM users ORDER BY id").fetchall()
     return [{**dict(r), "is_admin": bool(r["is_admin"]),
-             "rights": D.jload(r["rights"], {}), "limits": D.jload(r["limits"], {})}
+             "rights": D.jload(r["rights"], {}), "limits": D.jload(r["limits"], {}),
+             "must_change_pw": bool(r["must_change_pw"])}
             for r in rows]
 
 
@@ -610,6 +737,12 @@ async def users_update(uid: int, request: Request,
             raise HTTPException(400, "password min 8")
         sets.append("pass_hash=?")
         vals.append(A.hash_password(body["password"]))
+        if body.get("must_change_pw"):
+            sets.append("must_change_pw=?")
+            vals.append(1)
+    elif "must_change_pw" in body:
+        sets.append("must_change_pw=?")
+        vals.append(1 if body["must_change_pw"] else 0)
     if "is_admin" in body and uid != me_["id"]:
         sets.append("is_admin=?")
         vals.append(1 if body["is_admin"] else 0)

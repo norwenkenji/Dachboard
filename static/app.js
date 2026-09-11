@@ -16,10 +16,20 @@ async function api(path, opts = {}) {
 
 function showLogin() {
   $("#login").classList.remove("hidden");
+  $("#setup").classList.add("hidden");
   $("#app").classList.add("hidden");
 }
 
 async function boot() {
+  try {
+    const need = await (await fetch("/api/setup-needed")).json();
+    if (need.needed) {
+      $("#setup").classList.remove("hidden");
+      $("#login").classList.add("hidden");
+      $("#app").classList.add("hidden");
+      return;
+    }
+  } catch { /* fall through to login */ }
   try {
     ME = await api("/api/me");
     RIGHTS = Object.keys(ME.rights || {}).filter((k) => ME.rights[k]);
@@ -33,16 +43,44 @@ async function boot() {
 
 $("#li-go").onclick = async () => {
   $("#li-err").textContent = "";
+  $("#li-first").classList.add("hidden");
   try {
     const r = await fetch("/api/login", { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login: $("#li-login").value, password: $("#li-pass").value }) });
-    if (!r.ok) throw new Error("bad credentials");
+    if (r.status === 401) {
+      let must = false;
+      try { must = (await r.json()).detail.must_change === true; } catch { /* plain 401 */ }
+      if (must) { $("#li-first").classList.remove("hidden"); throw new Error("set your password"); }
+      throw new Error("bad credentials");
+    }
+    if (!r.ok) throw new Error("login failed");
     const j = await r.json();
     CSRF = j.csrf;
     $("#li-pass").value = "";
     boot();
   } catch (e) { $("#li-err").textContent = e.message; }
+};
+$("#li-set").onclick = async () => {
+  $("#li-err").textContent = "";
+  const r = await fetch("/api/first-password", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login: $("#li-login").value,
+      old_password: $("#li-pass").value, new_password: $("#li-new").value }) });
+  if (!r.ok) { $("#li-err").textContent = "rejected"; return; }
+  $("#li-pass").value = $("#li-new").value; $("#li-new").value = "";
+  $("#li-go").click();
+};
+$("#su-go").onclick = async () => {
+  $("#su-err").textContent = "";
+  const r = await fetch("/api/setup", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: $("#su-token").value.trim(),
+      login: $("#su-login").value.trim(), password: $("#su-pass").value }) });
+  if (!r.ok) { $("#su-err").textContent = "rejected"; return; }
+  $("#li-login").value = $("#su-login").value;
+  $("#li-pass").value = $("#su-pass").value;
+  boot();
 };
 $("#li-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#li-go").click(); });
 $("#logout").onclick = async () => {
@@ -277,9 +315,9 @@ async function vUsers() {
     alert("saved");
   });
   view.querySelectorAll("[data-pw]").forEach((b) => b.onclick = async () => {
-    const p = prompt("new password (8+):"); if (!p) return;
+    const p = prompt("new password (8+), user must change it on first login:"); if (!p) return;
     await api(`/api/users/${b.dataset.pw}`, { method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: p }) });
+      body: JSON.stringify({ password: p, must_change_pw: true }) });
     alert("changed");
   });
   view.querySelectorAll("[data-u-del]").forEach((b) => b.onclick = async () => {
