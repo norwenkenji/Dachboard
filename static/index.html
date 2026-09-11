@@ -3,37 +3,40 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>dachboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23131417'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='none' stroke='%235cb98b' stroke-width='2.5'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div id="setup" class="card hidden">
-  <h1>first setup</h1>
-  <p class="dim">one-time token from server log</p>
-  <input id="su-token" placeholder="setup token">
-  <input id="su-login" placeholder="admin login">
-  <input id="su-pass" type="password" placeholder="password 12+">
-  <button id="su-go" class="primary">create admin</button>
+<div id="setup" class="auth-wrap hidden"><div class="card">
+  <div class="brand"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#131417"/><rect x="9" y="9" width="14" height="14" rx="3" fill="none" stroke="#5cb98b" stroke-width="2.5"/></svg><b>dachboard</b></div>
+  <h1>First setup</h1>
+  <p class="sub">One-time token from the server log.</p>
+  <input id="su-token" placeholder="Setup token" autocomplete="off">
+  <input id="su-login" placeholder="Admin login" autocomplete="username">
+  <input id="su-pass" type="password" placeholder="Password, 12+ chars" autocomplete="new-password">
+  <button id="su-go" class="primary" style="width:100%">Create admin</button>
   <div id="su-err" class="err"></div>
-</div>
-<div id="login" class="card hidden">
-  <h1>dachboard</h1>
-  <input id="li-login" placeholder="login" autocomplete="username">
-  <input id="li-pass" type="password" placeholder="password" autocomplete="current-password">
-  <button id="li-go">enter</button>
+</div></div>
+<div id="login" class="auth-wrap hidden"><div class="card">
+  <div class="brand"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#131417"/><rect x="9" y="9" width="14" height="14" rx="3" fill="none" stroke="#5cb98b" stroke-width="2.5"/></svg><b>dachboard</b></div>
+  <input id="li-login" placeholder="Login" autocomplete="username">
+  <input id="li-pass" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="li-go" class="primary" style="width:100%">Sign in</button>
   <div id="li-first" class="hidden">
-    <p class="dim">first login — set your own password</p>
-    <input id="li-new" type="password" placeholder="new password 8+">
-    <button id="li-set">set &amp; enter</button>
+    <p class="sub">First login — set your own password.</p>
+    <input id="li-new" type="password" placeholder="New password, 8+ chars" autocomplete="new-password">
+    <button id="li-set" style="width:100%">Set &amp; sign in</button>
   </div>
   <div id="li-err" class="err"></div>
-</div>
+</div></div>
 <div id="app" class="hidden">
-  <header>
-    <b>dachboard</b>
-    <nav id="tabs"></nav>
+  <header class="top">
+    <div class="brand"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#131417"/><rect x="9" y="9" width="14" height="14" rx="3" fill="none" stroke="#5cb98b" stroke-width="2.5"/></svg><b>dachboard</b></div>
+    <nav class="tabs" id="tabs"></nav>
     <span id="me"></span>
-    <button id="logout">exit</button>
+    <button id="logout" class="ghost" title="Sign out"></button>
   </header>
   <main id="view"></main>
 </div>
