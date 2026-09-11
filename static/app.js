@@ -12,9 +12,12 @@ const u = (p) => BASE + p;
 /* ---- i18n (default en) ---- */
 const STR = {
 en: {
-  nav_overview: "overview", nav_services: "services", nav_console: "console",
+  nav_overview: "home", nav_services: "services", nav_console: "console",
   nav_files: "files", nav_tunnel: "tunnel", nav_users: "users",
-  pg_overview_t: "Overview", pg_overview_d: "Live vitals of this host — CPU, memory, disk, temperature and failed units.",
+  pg_overview_t: "Home", pg_overview_d: "Live vitals of this host plus the public URL — the landing page.",
+  term_slot_ph: "slot, e.g. u-c1", term_open: "Open shell",
+  show_system: "Show system units", search_ph: "Search by name…",
+  sys_hidden: "system units hidden",
   pg_services_t: "Services", pg_services_d: "Docker containers and systemd units. Logs are readable with the view right; control actions need approval.",
   pg_console_t: "Console", pg_console_d: "Reviewed one-shot commands and a live shell in your own slot.",
   pg_files_t: "Files", pg_files_d: "Your home directory. Admins can hop between slots.",
@@ -55,9 +58,12 @@ en: {
   loading: "Loading…", confirm_q: "Confirm?",
 },
 ru: {
-  nav_overview: "обзор", nav_services: "службы", nav_console: "консоль",
+  nav_overview: "главная", nav_services: "службы", nav_console: "консоль",
   nav_files: "файлы", nav_tunnel: "туннель", nav_users: "пользователи",
-  pg_overview_t: "Обзор", pg_overview_d: "Живые показатели хоста — CPU, память, диск, температуры и упавшие юниты.",
+  pg_overview_t: "Главная", pg_overview_d: "Живые показатели хоста и публичный URL — посадочная страница.",
+  term_slot_ph: "слот, напр. u-c1", term_open: "Открыть шелл",
+  show_system: "Показать системные", search_ph: "Поиск по имени…",
+  sys_hidden: "системные скрыты",
   pg_services_t: "Службы", pg_services_d: "Docker-контейнеры и systemd-юниты. Логи видно с правом просмотра, управление — только с допуском.",
   pg_console_t: "Консоль", pg_console_d: "Проверенные разовые команды и живой шелл в твоем слоте.",
   pg_files_t: "Файлы", pg_files_d: "Твоя домашняя папка. Админ может прыгать между слотами.",
@@ -291,6 +297,7 @@ async function vOverview() {
   try {
     const m = await api("/api/metrics");
     const svcs = await api("/api/services").catch(() => []);
+    const tun = await api("/api/tunnel").catch(() => ({ url: null }));
     const bad = svcs.filter((s) => s.active === "failed");
     const pct = (a, b) => (b ? Math.min(100, (a / b) * 100) : 0).toFixed(0);
     const temps = Object.entries(m.temps || {})
@@ -312,6 +319,8 @@ async function vOverview() {
           <div class="tgrid">${temps || "—"}</div></div>
         <div class="vrow"><span class="vk">${t("failed")}</span>
           <span class="vv ${bad.length ? "bad" : "ok"}">${bad.length ? bad.map((s) => esc(s.unit)).join(", ") : "0"}</span></div>
+        ${has("tunnel_view") ? `<div class="vrow"><span class="vk">${t("tunnel_url")}</span>
+          <span class="vv mono" style="overflow:hidden;text-overflow:ellipsis">${esc(tun.url || t("tunnel_none"))}</span></div>` : ""}
       </div>
       <div class="row"><button id="ov-ref">${ic("refresh")}${t("refresh")}</button></div>`;
     $("#ov-ref").onclick = vOverview;
@@ -327,7 +336,9 @@ async function vServices() {
   view.innerHTML = `<p class="dim">${t("loading")}</p>`;
   const list = await api("/api/containers");
   const units = await api("/api/services");
-  const show = units.filter((s) => !/^(sys|systemd|dbus|user@|getty)/.test(s.unit));
+  const SYS = /^(systemd-|sys-|dev-|proc-|serial-getty|console-getty|getty@|user@|user-runtime|dbus|avahi|bluetooth|cups|ModemManager|polkit|udisks2|upower|accounts-daemon|rsyslog|unattended-upgrades|apport|whoopsie|thermald|irqbalance|lvm2-|dm-event|grub-|apt-|man-db|logrotate|e2scrub|fstrim|motd-news|update-notifier|packagekit|snapd|salt-|mdmonitor)/;
+  // ghosts like dead connman.service come from --all with load=not-found
+  const isSys = (s) => s.load === "not-found" || SYS.test(s.unit);
   const ctrl = has("containers_control");
   const btns = (kind, name) => ctrl
     ? `<button data-sact="restart:${kind}:${esc(name)}" title="${t("restart")}">${ic("refresh")}</button>
@@ -335,15 +346,18 @@ async function vServices() {
        <button data-sact="start:${kind}:${esc(name)}" title="${t("start")}">${ic("play")}</button>` : "";
   view.innerHTML = `
     <h3>${ic("box")}${t("docker_t")}</h3>
-    <table><thead><tr><th>${t("th_name")}</th><th>${t("th_image")}</th><th>${t("th_state")}</th><th>${t("th_status")}</th><th></th></tr></thead><tbody>
-    ${list.map((c) => `<tr><td class="mono"><b>${esc(c.Names)}</b></td><td class="dim mono">${esc(c.Image)}</td>
+    <div class="row"><input id="c-filter" placeholder="${t("search_ph")}" style="max-width:220px"></div>
+    <table><thead><tr><th>${t("th_name")}</th><th>${t("th_image")}</th><th>${t("th_state")}</th><th>${t("th_status")}</th><th></th></tr></thead><tbody id="c-rows">
+    ${list.map((c) => `<tr data-n="${esc((c.Names || "").toLowerCase())}"><td class="mono"><b>${esc(c.Names)}</b></td><td class="dim mono">${esc(c.Image)}</td>
       <td>${stateDot(c.State)}</td><td class="dim">${esc(c.Status || "")}</td>
       <td style="white-space:nowrap"><button data-clog="${esc(c.Names)}">${t("logs")}</button>${btns("docker", c.Names)}</td></tr>`).join("")}
     </tbody></table>
     <h3>${ic("grid")}${t("systemd_t")}</h3>
-    <div class="row"><input id="s-filter" placeholder="${t("filter_ph")}" style="max-width:220px"></div>
+    <div class="row"><input id="s-filter" placeholder="${t("search_ph")}" style="max-width:220px">
+    <label class="ck"><input type="checkbox" id="s-sys">${t("show_system")}</label>
+    <span class="dim" id="s-count"></span></div>
     <table><thead><tr><th>${t("th_unit")}</th><th>${t("th_active")}</th><th>${t("th_desc")}</th><th></th></tr></thead><tbody id="s-rows">
-    ${show.map((s) => `<tr data-u="${esc(s.unit)}"><td class="mono"><b>${esc(s.unit)}</b></td>
+    ${units.map((s) => `<tr data-n="${esc(s.unit.toLowerCase())}" data-sys="${isSys(s) ? 1 : 0}"><td class="mono"><b>${esc(s.unit)}</b></td>
       <td>${stateDot(s.active)}</td><td class="dim">${esc(s.desc)}</td>
       <td style="white-space:nowrap"><button data-slog="${esc(s.unit)}">${t("logs")}</button>${btns("unit", s.unit)}</td></tr>`).join("")}
     </tbody></table>
@@ -370,11 +384,26 @@ async function vServices() {
     alert("exit " + r.code + "\n" + (r.output || "").slice(-500));
     vServices();
   });
-  $("#s-filter").oninput = (e) => {
-    const q = e.target.value.toLowerCase();
-    view.querySelectorAll("#s-rows tr").forEach((tr) =>
-      tr.style.display = tr.dataset.u.toLowerCase().includes(q) ? "" : "none");
+  const applyFilters = () => {
+    const cq = ($("#c-filter").value || "").toLowerCase();
+    view.querySelectorAll("#c-rows tr").forEach((tr) =>
+      tr.style.display = tr.dataset.n.includes(cq) ? "" : "none");
+    const q = ($("#s-filter").value || "").toLowerCase();
+    const showSys = $("#s-sys").checked;
+    let n = 0, hidden = 0;
+    view.querySelectorAll("#s-rows tr").forEach((tr) => {
+      const sys = tr.dataset.sys === "1";
+      const ok = tr.dataset.n.includes(q) && (showSys || !sys);
+      tr.style.display = ok ? "" : "none";
+      if (ok) n++; else if (sys && tr.dataset.n.includes(q)) hidden++;
+    });
+    $("#s-count").textContent = hidden && !showSys
+      ? `${n} · ${hidden} ${t("sys_hidden")}` : `${n}`;
   };
+  $("#c-filter").oninput = applyFilters;
+  $("#s-filter").oninput = applyFilters;
+  $("#s-sys").onchange = applyFilters;
+  applyFilters();
 }
 
 /* ---- console: presets + shell in one place ---- */
@@ -402,7 +431,12 @@ async function vConsole() {
     }
   }
   if (canTerm) {
-    html += `<h3>${ic("term")}${t("term_t")}</h3><div id="term-slot"><p class="dim">${t("term_starting")}</p></div>`;
+    const needPick = ME.is_admin && !ME.slot;
+    html += `<h3>${ic("term")}${t("term_t")}</h3>` + (needPick
+      ? `<div class="row"><input id="t-slot" placeholder="${t("term_slot_ph")}" style="max-width:180px">
+         <button id="t-open" class="primary">${ic("play")}${t("term_open")}</button></div>
+         <div id="term-slot"></div>`
+      : `<div id="term-slot"><p class="dim">${t("term_starting")}</p></div>`);
   }
   view.innerHTML = html || `<p class="dim">—</p>`;
   if (canRun) {
@@ -434,14 +468,27 @@ async function vConsole() {
     }
   }
   if (canTerm) {
-    try {
-      const r = await api("/api/terminal/ensure", { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: "{}" });
-      $("#term-slot").innerHTML =
-        `<p class="dim"><span class="mono">${esc(r.slot)}</span> · 127.0.0.1:${r.port}</p>
-         <iframe class="term" src="/term/${esc(r.slot)}/" title="terminal"></iframe>`;
-    } catch (e) {
-      $("#term-slot").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+    const startTerm = async (slot) => {
+      try {
+        const r = await api("/api/terminal/ensure", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(slot ? { slot } : {}) });
+        $("#term-slot").innerHTML =
+          `<p class="dim"><span class="mono">${esc(r.slot)}</span> · 127.0.0.1:${r.port}</p>
+           <iframe class="term" src="/term/${esc(r.slot)}/" title="terminal"></iframe>`;
+      } catch (e) {
+        $("#term-slot").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+      }
+    };
+    if (ME.is_admin && !ME.slot) {
+      $("#t-open").onclick = () => {
+        const s = $("#t-slot").value.trim();
+        if (!s) return;
+        $("#term-slot").innerHTML = `<p class="dim">${t("term_starting")}</p>`;
+        startTerm(s);
+      };
+    } else {
+      startTerm(null);
     }
   }
 }
