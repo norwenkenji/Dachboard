@@ -37,8 +37,9 @@ fi
 ttyd --version || true
 
 # --- tree ---
-mkdir -p "$DACH" "$DACH/data"
+mkdir -p "$DACH" "$DACH/data" "$DACH/term"
 cp -r "$REPO_DIR/app" "$REPO_DIR/static" "$REPO_DIR/tunnel" "$DACH/"
+cp -r "$REPO_DIR/term/." "$DACH/term/"
 cp "$REPO_DIR/requirements.txt" "$DACH/"
 [ -f "$DACH/config.yaml" ] || cp "$REPO_DIR/config.example.yaml" "$DACH/config.yaml"
 chmod +x "$DACH"/tunnel/providers/*.sh
