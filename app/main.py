@@ -410,7 +410,7 @@ async def commands_create(request: Request, dach_sid: str | None = Cookie(defaul
     check_csrf(request, dach_sid)
     body = await request.json()
     argv = body.get("argv")
-    if not argv or not all(isinstance(a, str) for a in argv):
+    if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
         raise HTTPException(400, "argv must be string array (no shell)")
     with closing(D.connect(DB)) as con:
         try:
@@ -432,6 +432,9 @@ async def commands_update(cid: int, request: Request,
     await require("commands_edit", dach_sid)
     check_csrf(request, dach_sid)
     body = await request.json()
+    argv = body.get("argv", [])
+    if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
+        raise HTTPException(400, "argv must be string array (no shell)")
     with closing(D.connect(DB)) as con:
         con.execute("UPDATE commands SET name=?,argv=?,run_as=?,allowed=?,timeout_sec=?"
                     " WHERE id=?",

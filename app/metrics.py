@@ -53,7 +53,7 @@ def disk(path: str = "/") -> dict:
         total = st.f_blocks * st.f_frsize
         free = st.f_bavail * st.f_frsize
         return {"total": total, "used": total - free, "free": free}
-    except OSError:
+    except Exception:
         return {"total": 0, "used": 0, "free": 0}
 
 
@@ -78,7 +78,7 @@ def temps() -> dict:
 def load() -> list:
     try:
         return list(os.getloadavg())
-    except OSError:
+    except Exception:
         return [0.0, 0.0, 0.0]
 
 

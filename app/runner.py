@@ -1,14 +1,20 @@
 """Command runner. argv-arrays only, NO shell. Runs as target Linux user."""
 from __future__ import annotations
 
-import pwd
 import shutil
 import subprocess
+
+try:
+    import pwd
+except ImportError:  # Windows: no user db
+    pwd = None
 
 MAX_OUTPUT = 64 * 1024
 
 
 def user_exists(name: str) -> bool:
+    if pwd is None:
+        return False
     try:
         pwd.getpwnam(name)
         return True
