@@ -133,16 +133,47 @@ async def session_user(token: str | None) -> dict | None:
     return get_user(r["user_id"])
 
 
-async def require(right: str, token: str | None) -> dict:
+async def require(right: str, token: str | None, request: Request | None = None) -> dict:
+    if request is not None:
+        t = token_subject(request)
+        if t:
+            if not can(t, right):
+                raise HTTPException(403, "forbidden")
+            return t
+        authz = request.headers.get("authorization", "")
+        if authz.lower().startswith("bearer "):
+            raise HTTPException(401, "bad token")
     u = await session_user(token)
     if not u or not can(u, right):
         raise HTTPException(403 if u else 401, "forbidden")
     return u
 
 
+def token_subject(request: Request) -> dict | None:
+    """Machine auth: Authorization: Bearer <api-token>. Scoped rights."""
+    import hashlib
+    authz = request.headers.get("authorization", "")
+    if not authz.lower().startswith("bearer "):
+        return None
+    digest = hashlib.sha256(authz[7:].strip().encode()).hexdigest()
+    with closing(D.connect(DB)) as con:
+        r = con.execute("SELECT id, rights FROM api_tokens WHERE token_hash=?",
+                        (digest,)).fetchone()
+        if not r:
+            return None
+        con.execute("UPDATE api_tokens SET last_used_at=? WHERE id=?",
+                    (int(time.time()), r["id"]))
+        con.commit()
+        return {"id": 0, "login": f"token#{r['id']}", "is_admin": False,
+                "via": "token", "rights": D.jload(r["rights"], {}),
+                "limits": {}, "slot": None}
+
+
 def check_csrf(request: Request, token: str | None) -> None:
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
+    if token_subject(request):
+        return  # bearer calls carry no cookies; nothing to forge
     want = None
     if token:
         with closing(D.connect(DB)) as con:
@@ -656,9 +687,9 @@ async def terminal_ensure(request: Request, dach_sid: str | None = Cookie(defaul
 # ---------- tunnel ----------
 
 @app.get("/api/tunnel")
-async def tunnel_url(refresh: bool = False,
+async def tunnel_url(request: Request, refresh: bool = False,
                      dach_sid: str | None = Cookie(default=None)):
-    u = await require("tunnel_view", dach_sid)
+    u = await require("tunnel_view", dach_sid, request)
     t = CFG.get("tunnel", {})
     if refresh:
         T.refresh()
@@ -671,9 +702,52 @@ async def tunnel_url(refresh: bool = False,
 
 @app.post("/api/tunnel/refresh")
 async def tunnel_refresh(request: Request, dach_sid: str | None = Cookie(default=None)):
-    await require("tunnel_view", dach_sid)
+    await require("tunnel_view", dach_sid, request)
     check_csrf(request, dach_sid)
     T.refresh()
+    return {"ok": True}
+
+
+# ---------- api tokens (machine access for bots/sites/any code) ----------
+
+@app.get("/api/tokens")
+async def tokens_list(dach_sid: str | None = Cookie(default=None)):
+    await require("users_manage", dach_sid)
+    with closing(D.connect(DB)) as con:
+        rows = con.execute(
+            "SELECT id,name,rights,created_at,last_used_at FROM api_tokens ORDER BY id").fetchall()
+    return [{**dict(r), "rights": D.jload(r["rights"], {})} for r in rows]
+
+
+@app.post("/api/tokens")
+async def tokens_create(request: Request, dach_sid: str | None = Cookie(default=None)):
+    await require("users_manage", dach_sid)
+    check_csrf(request, dach_sid)
+    body = await request.json()
+    name = str(body.get("name", "")).strip()[:64] or "bot"
+    rights = {r: bool(body.get("rights", {}).get(r, False)) for r in RIGHTS
+              if r not in ADMIN_ONLY}
+    tok, digest = A.api_token()
+    with closing(D.connect(DB)) as con:
+        try:
+            cur = con.execute(
+                "INSERT INTO api_tokens(name,token_hash,rights,created_at)"
+                " VALUES(?,?,?,?)",
+                (name, digest, json.dumps(rights), int(time.time())))
+            con.commit()
+            return {"id": cur.lastrowid, "token": tok}
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+
+@app.delete("/api/tokens/{tid}")
+async def tokens_delete(tid: int, request: Request,
+                        dach_sid: str | None = Cookie(default=None)):
+    await require("users_manage", dach_sid)
+    check_csrf(request, dach_sid)
+    with closing(D.connect(DB)) as con:
+        con.execute("DELETE FROM api_tokens WHERE id=?", (tid,))
+        con.commit()
     return {"ok": True}
 
 
@@ -758,7 +832,13 @@ async def users_update(uid: int, request: Request,
     with closing(D.connect(DB)) as con:
         con.execute(f"UPDATE users SET {','.join(sets)} WHERE id=?", (*vals, uid))
         con.commit()
-    return {"ok": True}
+        row = con.execute("SELECT slot, limits FROM users WHERE id=?", (uid,)).fetchone()
+    quota_applied, quota_msg = False, ""
+    if row and row["slot"]:
+        from . import quota as Q
+        lim = D.jload(row["limits"], {}).get("disk_quota")
+        quota_applied, quota_msg = await asyncio.to_thread(Q.apply_quota, row["slot"], lim)
+    return {"ok": True, "quota_applied": quota_applied, "quota_msg": quota_msg}
 
 
 @app.delete("/api/users/{uid}")
@@ -786,7 +866,7 @@ async def rights_list(dach_sid: str | None = Cookie(default=None)):
 
 def cli():
     ap = argparse.ArgumentParser(prog="dachboard")
-    ap.add_argument("cmd", choices=["serve", "create-admin"])
+    ap.add_argument("cmd", choices=["serve", "create-admin", "reconcile-quotas"])
     ap.add_argument("--config")
     a = ap.parse_args()
     global CFG, DB, SECRET_FILE, SECRET
@@ -811,6 +891,14 @@ def cli():
                  json.dumps({r: True for r in RIGHTS}), "{}", int(time.time())))
             con.commit()
         print(f"admin {login} created")
+    elif a.cmd == "reconcile-quotas":
+        from . import quota as Q
+        with closing(D.connect(DB)) as con:
+            rows = con.execute("SELECT login, slot, limits FROM users WHERE slot IS NOT NULL").fetchall()
+        for r in rows:
+            lim = D.jload(r["limits"], {}).get("disk_quota")
+            ok, msg = Q.apply_quota(r["slot"], lim)
+            print(f"{r['login']}/{r['slot']}: {'OK' if ok else 'SKIP'} {lim} {msg}")
     elif a.cmd == "serve":
         import uvicorn
         uvicorn.run("app.main:app", host=CFG.get("host", "127.0.0.1"),

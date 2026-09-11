@@ -331,6 +331,34 @@ async function vUsers() {
         slot: $("#nu-slot").value.trim() || null, is_admin: $("#nu-admin").checked, rights: {}, limits: {} }) });
     vUsers();
   };
+  view.insertAdjacentHTML("beforeend", `<h3>api tokens (bots, sites, any code)</h3>
+    <div class=dim>curl -H "Authorization: Bearer TOKEN" /api/tunnel</div>
+    <div id="t-list"></div>
+    <div class=row><input id="nt-name" placeholder="name">
+    <label class=ck><input type=checkbox id="nt-tun" checked>tunnel_view</label>
+    <button id="nt-add" class=primary>new token (shown once)</button></div>
+    <pre id="nt-once" class=hidden></pre>`);
+  const reloadTokens = async () => {
+    const toks = await api("/api/tokens");
+    $("#t-list").innerHTML = toks.map((t) => `<div class=row>#${t.id} <b>${esc(t.name)}</b>
+      <span class=dim>${esc(Object.keys(t.rights).filter((k) => t.rights[k]).join(",") || "—")}
+      last: ${t.last_used_at ? new Date(t.last_used_at * 1000).toLocaleString() : "never"}</span>
+      <button data-tdel="${t.id}">revoke</button></div>`).join("") || "<p class=dim>none</p>";
+    view.querySelectorAll("[data-tdel]").forEach((b) => b.onclick = async () => {
+      if (!confirm("revoke token?")) return;
+      await api(`/api/tokens/${b.dataset.tdel}`, { method: "DELETE" });
+      reloadTokens();
+    });
+  };
+  $("#nt-add").onclick = async () => {
+    const r = await api("/api/tokens", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("#nt-name").value.trim() || "bot",
+        rights: { tunnel_view: $("#nt-tun").checked } }) });
+    const p = $("#nt-once"); p.classList.remove("hidden");
+    p.textContent = "SAVE NOW, shown once:\n" + r.token;
+    reloadTokens();
+  };
+  reloadTokens();
 }
 
 boot();

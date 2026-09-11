@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS metrics (
     cpu REAL, mem_used INTEGER, mem_total INTEGER,
     disk_used INTEGER, disk_total INTEGER, temp REAL, load1 REAL
 );
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    rights TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER NOT NULL DEFAULT 0
+);
 """
 
 

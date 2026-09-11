@@ -32,6 +32,20 @@ Run their agent pointing at `127.0.0.1:80`, then either:
 - write your own 5-line provider (see `tunnel/README.md`) that queries the
   agent's local API and prints the URL.
 
+## Asking for the fresh tunnel from any code
+
+No session needed — mint an API token in the UI (Users → api tokens,
+scope `tunnel_view`; shown once, revocable, `last_used` tracked):
+
+```bash
+curl -H "Authorization: Bearer dach_..." https://<tunnel>/api/tunnel
+# {"url": "https://xxx.trycloudflare.com"}
+```
+
+Any bot / site / script polls this and hands the fresh URL plus per-user
+credentials to its people. Session cookies keep working too; Bearer calls
+don't need CSRF (no cookies involved).
+
 ## Notes
 
 - HTTPS is terminated by the tunnel provider. Keep `cookie_secure: true`.

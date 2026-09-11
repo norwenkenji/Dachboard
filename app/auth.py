@@ -32,5 +32,12 @@ def new_token(nbytes: int = 32) -> str:
     return secrets.token_urlsafe(nbytes)
 
 
+def api_token() -> tuple[str, str]:
+    """Returns (public_token, sha256_hex) for storage."""
+    tok = "dach_" + secrets.token_urlsafe(32)
+    digest = hashlib.sha256(tok.encode()).hexdigest()
+    return tok, digest
+
+
 def now() -> int:
     return int(time.time())

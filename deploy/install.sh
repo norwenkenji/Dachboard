@@ -74,6 +74,35 @@ location /term/${slot}/ {
 EOF
 done
 
+# --- filesystem quotas: hard per-user caps, automatic on ext4 ---
+FSTYPE=$(findmnt -n -o FSTYPE / 2>/dev/null || echo unknown)
+if [ "$FSTYPE" = "ext4" ]; then
+  echo "enabling usrquota on / ..."
+  python3 - <<'EOF' || echo "fstab edit skipped"
+import shutil
+p = '/etc/fstab'
+shutil.copy(p, '/etc/fstab.dachbak')
+lines = open(p).read().splitlines(keepends=True)
+out = []
+for ln in lines:
+    s = ln.strip()
+    if s and not s.startswith('#'):
+        parts = s.split()
+        if len(parts) >= 4 and parts[1] == '/' and 'usrquota' not in parts[3].split(','):
+            parts[3] += ',usrquota'
+            ln = '\t'.join(parts) + '\n'
+    out.append(ln)
+open(p, 'w').writelines(out)
+print('fstab ok')
+EOF
+  mount -o remount / 2>/dev/null || echo "remount now failed (applies after reboot)"
+  quotacheck -cum / 2>&1 | tail -1 || true
+  quotaon / 2>&1 || true
+  systemctl enable quotaon 2>/dev/null || true
+else
+  echo "note: / is $FSTYPE, not ext4 — hard quotas skipped (dashboard still shows soft usage)"
+fi
+
 # --- dashboard unit ---
 cp "$REPO_DIR/deploy/systemd/dachboard.service" /etc/systemd/system/
 systemctl daemon-reload
