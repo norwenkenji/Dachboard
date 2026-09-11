@@ -20,7 +20,7 @@ en: {
   sys_hidden: "system units hidden",
   pg_services_t: "Services", pg_services_d: "Docker containers and systemd units. Logs are readable with the view right; control actions need approval.",
   pg_console_t: "Console", pg_console_d: "Reviewed one-shot commands and a live shell in your own slot.",
-  pg_files_t: "Files", pg_files_d: "Your home directory. Admins can hop between slots.",
+  pg_files_t: "Files", pg_files_d: "Your home directory. Admins see the whole filesystem.",
   pg_tunnel_t: "Tunnel", pg_tunnel_d: "The current public URL of this panel. Share it with credentials, never alone.",
   pg_users_t: "Users", pg_users_d: "Accounts, per-user rights, disk / CPU / RAM limits and API tokens for bots.",
   cpu: "CPU", memory: "Memory", disk: "Disk", uptime: "Uptime", temp: "Temp",
@@ -72,7 +72,7 @@ ru: {
   sys_hidden: "системные скрыты",
   pg_services_t: "Службы", pg_services_d: "Docker-контейнеры и systemd-юниты. Логи видно с правом просмотра, управление — только с допуском.",
   pg_console_t: "Консоль", pg_console_d: "Проверенные разовые команды и живой шелл в твоем слоте.",
-  pg_files_t: "Файлы", pg_files_d: "Твоя домашняя папка. Админ может прыгать между слотами.",
+  pg_files_t: "Файлы", pg_files_d: "Твоя домашняя папка. Админ видит всю систему.",
   pg_tunnel_t: "Туннель", pg_tunnel_d: "Текущий публичный URL панели. Раздавай вместе с доступами, не один.",
   pg_users_t: "Пользователи", pg_users_d: "Аккаунты, права, лимиты диска / CPU / RAM и API-токены для ботов.",
   cpu: "CPU", memory: "Память", disk: "Диск", uptime: "Аптайм", temp: "Темп.",
@@ -149,6 +149,11 @@ const P = {
   doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>',
   sheet: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
   db: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
+  edit: '<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  cut: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>',
+  clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
 };
 const ic = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
 $("#logout").innerHTML = ic("out");
@@ -584,11 +589,19 @@ const fmtDate = (ts) => { try { return new Date(ts * 1000).toLocaleString(); } c
 const relOf = (name) => (fPath ? fPath + "/" + name : name);
 
 function closeMenu() { document.querySelector(".ctxmenu")?.remove(); }
+if (!window.__dachMenuInit) {
+  window.__dachMenuInit = true;
+  document.addEventListener("click", closeMenu);
+  document.addEventListener("scroll", closeMenu, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { closeMenu(); closeModal(); }
+  });
+}
 function openMenu(x, y, items) {
   closeMenu();
   const m = document.createElement("div");
   m.className = "ctxmenu";
-  items.forEach(([label, icon, fn, dis]) => {
+  items.forEach(([label, icon, fn, dis, danger]) => {
     if (label === "-") {
       const s = document.createElement("div");
       s.className = "ctxsep";
@@ -598,6 +611,7 @@ function openMenu(x, y, items) {
     const b = document.createElement("button");
     b.innerHTML = ic(icon) + "<span>" + esc(label) + "</span>";
     b.disabled = !!dis;
+    if (danger) b.classList.add("danger");
     b.onclick = (ev) => { ev.stopPropagation(); closeMenu(); if (fn) fn(); };
     m.appendChild(b);
   });
@@ -745,8 +759,8 @@ function rowMenu(x, y, name, isDir) {
       if (isDir) { fPath = relOf(name); fSel = null; fRender(); }
       else previewFile(name);
     }],
-    [t("fm_rename"), "check", () => inlineRename(name)],
-    [t("fm_download"), "trash", () => {
+    [t("fm_rename"), "edit", () => inlineRename(name)],
+    [t("fm_download"), "download", () => {
       if (isDir) return;
       const a = document.createElement("a");
       a.href = u("/api/files/download?path=" + encodeURIComponent(relOf(name)));
@@ -754,20 +768,20 @@ function rowMenu(x, y, name, isDir) {
       a.click();
     }, isDir],
     ["-", null, null],
-    [t("fm_copy"), "plus", () => { fClip = { mode: "copy", src: relOf(name) }; fRender(); }],
-    [t("fm_cut"), "x", () => { fClip = { mode: "cut", src: relOf(name) }; fRender(); }],
-    [t("fm_paste"), "check", doPaste, !fClip],
+    [t("fm_copy"), "copy", () => { fClip = { mode: "copy", src: relOf(name) }; fRender(); }],
+    [t("fm_cut"), "cut", () => { fClip = { mode: "cut", src: relOf(name) }; fRender(); }],
+    [t("fm_paste"), "clipboard", doPaste, !fClip],
     ["-", null, null],
-    [t("del_q"), "trash", () => doDelete(name)],
+    [t("del_q"), "trash", () => doDelete(name), false, true],
   ]);
 }
 
 function freshMenu(x, y) {
   openMenu(x, y, [
-    [t("fm_new_file"), "plus", () => inlineCreate(false)],
-    [t("fm_new_folder"), "plus", () => inlineCreate(true)],
-    [t("fm_upload"), "up", () => document.getElementById("f-upfile")?.click()],
-    [t("fm_paste"), "check", doPaste, !fClip],
+    [t("fm_new_file"), "file", () => inlineCreate(false)],
+    [t("fm_new_folder"), "folder", () => inlineCreate(true)],
+    [t("fm_upload"), "download", () => document.getElementById("f-upfile")?.click()],
+    [t("fm_paste"), "clipboard", doPaste, !fClip],
   ]);
 }
 

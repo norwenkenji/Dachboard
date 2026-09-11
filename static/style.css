@@ -129,9 +129,14 @@ tr[data-dir="1"] .fname .ic { color: var(--acc); }
 .fname { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
 .fname .ic { width: 17px; height: 17px; color: var(--dim); }
 #f-table { user-select: none; }
-.ctxmenu { position: fixed; z-index: 100; min-width: 190px;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
-  padding: 5px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.ctxmenu { position: fixed; z-index: 100; min-width: 200px;
+  background: var(--panel-2); border: 1px solid #34383f; border-radius: 10px;
+  padding: 5px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  animation: ctxin 0.12s ease-out; transform-origin: top left; }
+@keyframes ctxin {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
 .ctxmenu button { display: flex; align-items: center; gap: 10px; width: 100%;
   border: 0; background: transparent; text-align: left;
   padding: 8px 11px; margin: 0; border-radius: 6px; font-size: 13px; }
