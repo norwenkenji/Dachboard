@@ -61,3 +61,33 @@ def test_mkdir_remove(root):
 
 def test_disk_usage(root):
     assert F.disk_usage(root) == 8
+
+
+def test_move_rename(root):
+    F.move(root, "top.txt", "renamed.txt")
+    assert (root / "renamed.txt").read_text() == "top"
+    assert not (root / "top.txt").exists()
+    F.move(root, "sub/a.txt", "sub/deep/b.txt")
+    assert (root / "sub" / "deep" / "b.txt").read_text() == "hello"
+
+
+def test_move_refuses(root):
+    (root / "taken.txt").write_text("x")
+    with pytest.raises(FileExistsError):
+        F.move(root, "sub", "taken.txt")
+    with pytest.raises(PermissionError):
+        F.move(root, ".", "nope")
+    with pytest.raises(PermissionError):
+        F.move(root, "sub", "../escape")
+
+
+def test_copy(root):
+    F.copy(root, "top.txt", "c.txt")
+    assert (root / "c.txt").read_text() == "top"
+    assert (root / "top.txt").exists()
+    F.copy(root, "sub", "sub2")
+    assert (root / "sub2" / "a.txt").read_text() == "hello"
+    with pytest.raises(FileExistsError):
+        F.copy(root, "top.txt", "c.txt")
+    with pytest.raises(PermissionError):
+        F.copy(root, "sub", "../escape")

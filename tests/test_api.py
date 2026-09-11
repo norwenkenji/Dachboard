@@ -195,6 +195,24 @@ def test_service_logs_and_action(clients):
     assert r.status_code == 400
 
 
+def test_files_move_copy_api(clients):
+    csrf = login(clients["bob"], "bob")
+    b = clients["bob"]
+    h = {"X-CSRF-Token": csrf, "Content-Type": "application/json"}
+    assert b.post("/api/files/write",
+                  json={"path": "m.txt", "content": "mv"}, headers=h).status_code == 200
+    r = b.post("/api/files/move", json={"path": "m.txt", "to": "m2.txt"}, headers=h)
+    assert r.status_code == 200
+    rows = b.get("/api/files").json()
+    assert [x["name"] for x in rows] == ["m2.txt"]
+    r = b.post("/api/files/copy", json={"path": "m2.txt", "to": "m3.txt"}, headers=h)
+    assert r.status_code == 200
+    r = b.post("/api/files/move", json={"path": "m2.txt", "to": "../x"}, headers=h)
+    assert r.status_code == 400
+    r = b.post("/api/files/copy", json={"path": "m2.txt", "to": "m3.txt"}, headers=h)
+    assert r.status_code == 400
+
+
 def test_admin_root_files_and_terminal(clients):
     csrf = login(clients["admin"], "admin")
     a = clients["admin"]

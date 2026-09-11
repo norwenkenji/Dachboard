@@ -50,10 +50,37 @@ def mkdir(root: str | Path, rel: str) -> None:
 
 def remove(root: str | Path, rel: str) -> None:
     p = resolve(root, rel)
+    if p == Path(root).resolve():
+        raise PermissionError("no root delete")
     if p.is_dir() and not p.is_symlink():
         shutil.rmtree(p)
     else:
         p.unlink()
+
+
+def move(root: str | Path, src: str, dst: str) -> None:
+    root = Path(root).resolve()
+    s, d = resolve(root, src), resolve(root, dst)
+    if s == root or d == root:
+        raise PermissionError("no root move")
+    if d.exists():
+        raise FileExistsError(str(dst))
+    d.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(s, d)
+
+
+def copy(root: str | Path, src: str, dst: str) -> None:
+    root = Path(root).resolve()
+    s, d = resolve(root, src), resolve(root, dst)
+    if s == root or d == root:
+        raise PermissionError("no root copy")
+    if d.exists():
+        raise FileExistsError(str(dst))
+    d.parent.mkdir(parents=True, exist_ok=True)
+    if s.is_dir() and not s.is_symlink():
+        shutil.copytree(s, d)
+    else:
+        shutil.copy2(s, d)
 
 
 def disk_usage(path: str | Path) -> int:

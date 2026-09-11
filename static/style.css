@@ -116,6 +116,37 @@ main h3 { font-size: 12px; font-weight: 650; letter-spacing: 0.08em;
 .ok { color: var(--acc); } .bad { color: var(--danger); }
 .dim { color: var(--dim); } .faint { color: var(--faint); }
 
+/* explorer */
+.crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 6px 10px; margin-bottom: 10px; }
+.crumbs button { border: 0; background: transparent; color: var(--dim);
+  margin: 0; padding: 5px 9px; border-radius: 6px; font-family: var(--mono); font-size: 12.5px; }
+.crumbs button:hover { color: var(--txt); background: var(--panel-2); }
+.crumbs button:last-child { color: var(--acc); }
+tr.sel td { background: rgba(92, 185, 139, 0.07); }
+tr[data-dir="1"] .fname .ic { color: var(--acc); }
+.fname { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
+.fname .ic { width: 17px; height: 17px; color: var(--dim); }
+#f-table { user-select: none; }
+.ctxmenu { position: fixed; z-index: 100; min-width: 190px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 5px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.ctxmenu button { display: flex; align-items: center; gap: 10px; width: 100%;
+  border: 0; background: transparent; text-align: left;
+  padding: 8px 11px; margin: 0; border-radius: 6px; font-size: 13px; }
+.ctxmenu button:hover:not(:disabled) { background: rgba(92, 185, 139, 0.12); }
+.ctxmenu button:disabled { opacity: 0.35; }
+.ctxmenu button.danger { color: var(--danger); }
+.ctxsep { height: 1px; background: var(--line); margin: 5px 8px; }
+.overlay { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, 0.65);
+  display: flex; align-items: center; justify-content: center; padding: 24px; }
+.modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px; max-width: 88vw; max-height: 86vh; overflow: auto; }
+.modal img { max-width: 80vw; max-height: 70vh; border-radius: 8px; display: block; }
+.modal video { max-width: 80vw; max-height: 70vh; border-radius: 8px; }
+.modal textarea { min-width: min(70vw, 700px); min-height: 50vh; }
+
 /* vitals panel: rows + meters, no tiles */
 .panel { background: var(--panel); border: 1px solid var(--line);
   border-radius: 10px; padding: 6px 16px; }

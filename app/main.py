@@ -547,6 +547,32 @@ async def files_delete(request: Request, dach_sid: str | None = Cookie(default=N
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/files/move")
+async def files_move(request: Request, dach_sid: str | None = Cookie(default=None)):
+    u = await require("files", dach_sid)
+    check_csrf(request, dach_sid)
+    body = await request.json()
+    try:
+        F.move(home_of(u, body.get("slot") or None),
+               body.get("path", ""), body.get("to", ""))
+        return {"ok": True}
+    except (PermissionError, OSError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/files/copy")
+async def files_copy(request: Request, dach_sid: str | None = Cookie(default=None)):
+    u = await require("files", dach_sid)
+    check_csrf(request, dach_sid)
+    body = await request.json()
+    try:
+        F.copy(home_of(u, body.get("slot") or None),
+               body.get("path", ""), body.get("to", ""))
+        return {"ok": True}
+    except (PermissionError, OSError) as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/files/upload")
 async def files_upload(request: Request, path: str = "", slot: str = "",
                        dach_sid: str | None = Cookie(default=None)):
