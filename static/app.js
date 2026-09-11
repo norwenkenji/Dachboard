@@ -15,7 +15,7 @@ en: {
   nav_overview: "home", nav_services: "services", nav_console: "console",
   nav_files: "files", nav_tunnel: "tunnel", nav_users: "users",
   pg_overview_t: "Home", pg_overview_d: "Live vitals of this host plus the public URL — the landing page.",
-  term_slot_ph: "slot, e.g. u-c1", term_open: "Open shell",
+  term_slot_ph: "slot, e.g. u-c1 — or root for full access", term_open: "Open shell",
   show_system: "Show system units", search_ph: "Search by name…",
   sys_hidden: "system units hidden",
   pg_services_t: "Services", pg_services_d: "Docker containers and systemd units. Logs are readable with the view right; control actions need approval.",
@@ -34,7 +34,7 @@ en: {
   ctor_t: "Command constructor", ph_name: "Name", ph_runas: "run_as: owner / self / user",
   ph_allow: "Allowed user ids (* = all)", ph_argv: "One argument per line. No shell, ever.",
   add_cmd: "Add command", del_cmd_q: "Delete command?",
-  slot_ph: "slot, e.g. u-c1", open: "Open", pick_slot: "Pick a slot to browse its files.",
+  slot_ph: "slot, e.g. u-c1", open: "Open", pick_slot: "Pick a slot — or leave empty for the whole filesystem.",
   used: "used", limit: "limit", up: "Up", del_q: "Delete", new_ph: "New file or folder",
   file_btn: "File", folder_btn: "Folder", save: "Save", saved: "Saved",
   tunnel_url: "Public URL", tunnel_none: "— none —",
@@ -61,7 +61,7 @@ ru: {
   nav_overview: "главная", nav_services: "службы", nav_console: "консоль",
   nav_files: "файлы", nav_tunnel: "туннель", nav_users: "пользователи",
   pg_overview_t: "Главная", pg_overview_d: "Живые показатели хоста и публичный URL — посадочная страница.",
-  term_slot_ph: "слот, напр. u-c1", term_open: "Открыть шелл",
+  term_slot_ph: "слот, напр. u-c1 — или root для полного доступа", term_open: "Открыть шелл",
   show_system: "Показать системные", search_ph: "Поиск по имени…",
   sys_hidden: "системные скрыты",
   pg_services_t: "Службы", pg_services_d: "Docker-контейнеры и systemd-юниты. Логи видно с правом просмотра, управление — только с допуском.",
@@ -80,7 +80,7 @@ ru: {
   ctor_t: "Конструктор команд", ph_name: "Название", ph_runas: "run_as: owner / self / user",
   ph_allow: "ID допущенных (* = все)", ph_argv: "По одному аргументу на строку. Шелла нет и не будет.",
   add_cmd: "Добавить", del_cmd_q: "Удалить команду?",
-  slot_ph: "слот, напр. u-c1", open: "Открыть", pick_slot: "Выбери слот, чтобы смотреть файлы.",
+  slot_ph: "слот, напр. u-c1", open: "Открыть", pick_slot: "Выбери слот — или оставь пустым для всей файловой системы.",
   used: "занято", limit: "лимит", up: "Вверх", del_q: "Удалить",
   new_ph: "Новый файл или папка", file_btn: "Файл", folder_btn: "Папка",
   save: "Сохранить", saved: "Сохранено",
@@ -245,19 +245,18 @@ $("#logout").onclick = async () => {
 const has = (r) => ME && (ME.is_admin || (ME.rights || {})[r]);
 const TABS = [
   ["overview", null, "grid"], ["services", null, "box"], ["console", null, "term"],
-  ["files", "files", "folder"], ["tunnel", "tunnel_view", "link"], ["users", "users_manage", "users"],
+  ["files", "files", "folder"], ["users", "users_manage", "users"],
 ];
 const TABVIS = {
   overview: () => has("overview"),
   services: () => has("containers_view"),
   console: () => has("commands_run") || has("terminal"),
   files: () => has("files"),
-  tunnel: () => has("tunnel_view"),
   users: () => has("users_manage"),
 };
 const TABNAME = {
   overview: "nav_overview", services: "nav_services", console: "nav_console",
-  files: "nav_files", tunnel: "nav_tunnel", users: "nav_users",
+  files: "nav_files", users: "nav_users",
 };
 function buildTabs() {
   const nav = $("#tabs"); nav.innerHTML = "";
@@ -279,12 +278,12 @@ function showTab(name) {
   const meta = {
     overview: ["pg_overview_t", "pg_overview_d"], services: ["pg_services_t", "pg_services_d"],
     console: ["pg_console_t", "pg_console_d"], files: ["pg_files_t", "pg_files_d"],
-    tunnel: ["pg_tunnel_t", "pg_tunnel_d"], users: ["pg_users_t", "pg_users_d"],
+    users: ["pg_users_t", "pg_users_d"],
   }[name];
   $("#view").innerHTML = `<div class="pagehead"><h2>${t(meta[0])}</h2><p>${t(meta[1])}</p></div><div id="vbody"></div>`;
   view = $("#vbody");
   ({ overview: vOverview, services: vServices, console: vConsole,
-     files: vFiles, tunnel: vTunnel, users: vUsers })[name]();
+     files: vFiles, users: vUsers })[name]();
 }
 const fmtGB = (b) => (b / 1073741824).toFixed(1);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
@@ -570,19 +569,6 @@ async function fRender() {
       body: JSON.stringify({ path: $("#f-text").dataset.p, content: $("#f-text").value, slot: fSlot }) });
     $("#f-save").innerHTML = ic("check") + t("saved");
     setTimeout(() => { const b = $("#f-save"); if (b) b.innerHTML = ic("check") + t("save"); }, 1500);
-  };
-}
-
-/* ---- tunnel ---- */
-async function vTunnel() {
-  view.innerHTML = `<p class="dim">${t("loading")}</p>`;
-  const tun = await api("/api/tunnel");
-  view.innerHTML = `<div class="box"><h3>${ic("link")}${t("tunnel_url")}</h3>
-    <div class="url-big">${esc(tun.url || t("tunnel_none"))}</div>
-    <div class="row"><button id="t-ref">${ic("refresh")}${t("refresh")}</button></div></div>`;
-  $("#t-ref").onclick = async () => {
-    await api("/api/tunnel/refresh", { method: "POST" });
-    vTunnel();
   };
 }
 

@@ -103,6 +103,22 @@ else
   echo "note: / is $FSTYPE, not ext4 — hard quotas skipped (dashboard still shows soft usage)"
 fi
 
+# --- root shell unit + nginx block (admin only, gated by dashboard session) ---
+ROOT_PORT=$((PORT_BASE - 1))
+sed -e "s/PORT/$ROOT_PORT/" \
+  "$REPO_DIR/deploy/systemd/dach-ttyd-root.service.template" \
+  > /etc/systemd/system/dach-ttyd-root.service
+systemctl enable dach-ttyd-root.service >/dev/null
+cat > /etc/nginx/dachboard/term-root.conf <<EOF
+location /term/root/ {
+    auth_request /dash-auth?target=term&slot=root;
+    proxy_pass http://127.0.0.1:${ROOT_PORT}/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+EOF
+
 # --- dashboard unit ---
 cp "$REPO_DIR/deploy/systemd/dachboard.service" /etc/systemd/system/
 systemctl daemon-reload

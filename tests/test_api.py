@@ -195,6 +195,23 @@ def test_service_logs_and_action(clients):
     assert r.status_code == 400
 
 
+def test_admin_root_files_and_terminal(clients):
+    csrf = login(clients["admin"], "admin")
+    a = clients["admin"]
+    # admin without slot sees the whole filesystem
+    r = a.get("/api/files")
+    assert r.status_code == 200 and isinstance(r.json(), list)
+    # non-admin may not take root shell
+    bcsrf = login(clients["bob"], "bob")
+    r = clients["bob"].post("/api/terminal/ensure", json={"slot": "root"},
+                            headers={"X-CSRF-Token": bcsrf})
+    assert r.status_code == 403
+    # admin root request passes RBAC (500 here = no systemd, never 401/403)
+    r = a.post("/api/terminal/ensure", json={"slot": "root"},
+               headers={"X-CSRF-Token": csrf})
+    assert r.status_code not in (401, 403)
+
+
 def test_containers_gating(clients):
     login(clients["bob"], "bob")
     assert clients["bob"].get("/api/containers").status_code == 403

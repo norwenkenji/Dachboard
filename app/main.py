@@ -186,11 +186,13 @@ def check_csrf(request: Request, token: str | None) -> None:
 
 
 def home_of(user: dict, slot: str | None = None) -> Path:
-    if user["is_admin"] and slot:
-        return Path(f"/home/{slot}")
-    if user["slot"]:
-        return Path(f"/home/{user['slot']}")
-    raise HTTPException(403, "no home")
+    # admin slot = system-wide: empty slot means the whole filesystem
+    if user["is_admin"]:
+        return Path(f"/home/{slot}") if slot else Path("/")
+    tgt = slot or user["slot"]
+    if not tgt or (slot and slot != user["slot"]):
+        raise HTTPException(403, "no home")
+    return Path(f"/home/{tgt}")
 
 
 # ---------- app ----------
@@ -578,6 +580,10 @@ async def files_download(path: str, slot: str = "",
 async def quota(slot: str = "", dach_sid: str | None = Cookie(default=None)):
     u = await require("files", dach_sid)
     root = home_of(u, slot or None)
+    if str(root) == "/":
+        from . import metrics as _M
+        d = _M.disk("/")
+        return {"used": d["used"], "limit": None}
     used = await asyncio.to_thread(F.disk_usage, root)
     limit = (u.get("limits") or {}).get("disk_quota")
     return {"used": used, "limit": limit}
@@ -701,6 +707,8 @@ async def runs_list(dach_sid: str | None = Cookie(default=None)):
 # ---------- terminal ----------
 
 def _slot_port(slot: str) -> int | None:
+    if slot == "root":
+        return int(CFG.get("ttyd", {}).get("port_base", 7681)) - 1
     slots: list = CFG.get("slots", [])
     if slot in slots:
         return int(CFG.get("ttyd", {}).get("port_base", 7681)) + slots.index(slot)
@@ -713,12 +721,15 @@ async def terminal_ensure(request: Request, dach_sid: str | None = Cookie(defaul
     check_csrf(request, dach_sid)
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
     slot = body.get("slot") or u["slot"]
+    if slot == "root" and not u["is_admin"]:
+        raise HTTPException(403, "admin only")
     if not u["is_admin"] and slot != (u["slot"] or ""):
         raise HTTPException(403, "not yours")
     if not slot:
         raise HTTPException(400, "no slot")
+    unit = "dach-ttyd-root.service" if slot == "root" else f"dach-ttyd-{slot}.service"
     code, out = await asyncio.to_thread(
-        R.run_as, ["systemctl", "start", f"dach-ttyd-{slot}.service"], None, 20)
+        R.run_as, ["systemctl", "start", unit], None, 20)
     if code != 0:
         raise HTTPException(500, out[-500:])
     return {"slot": slot, "port": _slot_port(slot)}
