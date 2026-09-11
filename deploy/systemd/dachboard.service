@@ -1,0 +1,16 @@
+[Unit]
+Description=Dachboard panel
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dachboard
+ExecStart=/opt/dachboard/.venv/bin/python -m app.main serve --config /opt/dachboard/config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

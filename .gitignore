@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+*.db
+*.sqlite3
+config.yaml
+.secret
+.DS_Store

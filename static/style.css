@@ -1,0 +1,37 @@
+:root { --bg: #0d1117; --fg: #c9d1d9; --dim: #8b949e; --acc: #58a6ff;
+  --card: #161b22; --line: #30363d; --ok: #3fb950; --bad: #f85149; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif;
+  margin: 0; }
+.hidden { display: none !important; }
+.card { max-width: 320px; margin: 15vh auto; padding: 24px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 8px; }
+.card h1 { margin: 0 0 16px; font-size: 20px; }
+input, select, textarea, button { font: inherit; color: var(--fg);
+  background: #0d1117; border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 10px; margin: 4px 0; }
+textarea { width: 100%; min-height: 120px; font-family: monospace; }
+button { cursor: pointer; background: #21262d; }
+button:hover { border-color: var(--acc); }
+button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.err { color: var(--bad); min-height: 1.5em; }
+header { display: flex; gap: 12px; align-items: center; padding: 10px 16px;
+  background: var(--card); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header nav button.on { border-color: var(--acc); color: var(--acc); }
+header #me { margin-left: auto; color: var(--dim); }
+main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.box h3 { margin: 0 0 8px; font-size: 13px; color: var(--dim); text-transform: uppercase; }
+.big { font-size: 24px; }
+pre { background: #010409; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; overflow: auto; max-height: 50vh; white-space: pre-wrap;
+  font-size: 12px; }
+table { border-collapse: collapse; width: 100%; }
+td, th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left;
+  font-size: 13px; }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .dim { color: var(--dim); }
+iframe.term { width: 100%; height: 70vh; border: 1px solid var(--line);
+  border-radius: 8px; background: #000; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+label.ck { display: inline-flex; gap: 6px; align-items: center; margin-right: 12px; }

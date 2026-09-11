@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>dachboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="login" class="card hidden">
+  <h1>dachboard</h1>
+  <input id="li-login" placeholder="login" autocomplete="username">
+  <input id="li-pass" type="password" placeholder="password" autocomplete="current-password">
+  <button id="li-go">enter</button>
+  <div id="li-err" class="err"></div>
+</div>
+<div id="app" class="hidden">
+  <header>
+    <b>dachboard</b>
+    <nav id="tabs"></nav>
+    <span id="me"></span>
+    <button id="logout">exit</button>
+  </header>
+  <main id="view"></main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

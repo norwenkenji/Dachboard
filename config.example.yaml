@@ -1,0 +1,38 @@
+# --- network ---
+host: 127.0.0.1
+port: 8420
+cookie_secure: true        # set false only for plain-http LAN use
+session_ttl_hours: 72
+
+# --- paths ---
+secret_file: /opt/dachboard/.secret
+db_path: /opt/dachboard/data/dachboard.sqlite3
+
+# --- tunnel provider ---
+# Any executable. First http(s):// URL on its stdout wins.
+# Bundled: tunnel/providers/cloudflared-quick.sh [container]
+#          tunnel/providers/static.sh <file-with-url>
+tunnel:
+  provider: tunnel/providers/cloudflared-quick.sh
+  args: [dachboard-tunnel]
+  cache_seconds: 30
+  cache_file: /opt/dachboard/data/tunnel_url.txt
+
+# --- terminal (ttyd) ---
+ttyd:
+  bin: /usr/local/bin/ttyd
+  port_base: 7681          # slot i -> port_base + i
+  shell: bash
+
+# --- managed user slots (created by install.sh as u-c1..u-c4, nologin) ---
+slots:
+  - u-c1
+  - u-c2
+  - u-c3
+  - u-c4
+
+# default limits for new users (admin can change per user in UI)
+defaults:
+  cpu_quota: "50%"
+  mem_max: "1G"
+  disk_quota: "2G"
