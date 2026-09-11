@@ -1,7 +1,13 @@
 /* dachboard SPA. vanilla JS, no build. */
 let CSRF = "", ME = null;
 const $ = (s) => document.querySelector(s);
-const view = $("#view");
+let view = $("#view");
+/* works both at / and under a subpath like /dash/ */
+const BASE = (() => {
+  const m = location.pathname.match(/^(\/dash)(?=\/|$)/);
+  return m ? m[1] : "";
+})();
+const u = (p) => BASE + p;
 
 /* stroke icons (feather-style, inline) */
 const P = {
@@ -32,7 +38,7 @@ async function api(path, opts = {}) {
   opts.headers = opts.headers || {};
   if (CSRF && opts.method && opts.method !== "GET")
     opts.headers["X-CSRF-Token"] = CSRF;
-  const r = await fetch(path, opts);
+  const r = await fetch(u(path), opts);
   if (r.status === 401) { showLogin(); throw new Error("auth"); }
   if (!r.ok) { const t = await r.text(); throw new Error(t.slice(0, 200)); }
   const ct = r.headers.get("content-type") || "";
@@ -47,7 +53,7 @@ function showLogin() {
 
 async function boot() {
   try {
-    const need = await (await fetch("/api/setup-needed")).json();
+    const need = await (await fetch(u("/api/setup-needed"))).json();
     if (need.needed) {
       $("#setup").classList.remove("hidden");
       $("#login").classList.add("hidden");
@@ -69,7 +75,7 @@ $("#li-go").onclick = async () => {
   $("#li-err").textContent = "";
   $("#li-first").classList.add("hidden");
   try {
-    const r = await fetch("/api/login", { method: "POST",
+    const r = await fetch(u("/api/login"), { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login: $("#li-login").value, password: $("#li-pass").value }) });
     if (r.status === 401) {
@@ -88,7 +94,7 @@ $("#li-go").onclick = async () => {
 $("#li-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#li-go").click(); });
 $("#li-set").onclick = async () => {
   $("#li-err").textContent = "";
-  const r = await fetch("/api/first-password", { method: "POST",
+  const r = await fetch(u("/api/first-password"), { method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ login: $("#li-login").value,
       old_password: $("#li-pass").value, new_password: $("#li-new").value }) });
@@ -98,7 +104,7 @@ $("#li-set").onclick = async () => {
 };
 $("#su-go").onclick = async () => {
   $("#su-err").textContent = "";
-  const r = await fetch("/api/setup", { method: "POST",
+  const r = await fetch(u("/api/setup"), { method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token: $("#su-token").value.trim(),
       login: $("#su-login").value.trim(), password: $("#su-pass").value }) });
@@ -134,6 +140,17 @@ function buildTabs() {
 function showTab(name) {
   document.querySelectorAll("#tabs button").forEach((b) =>
     b.classList.toggle("on", b.dataset.tab === name));
+  const meta = {
+    overview: ["Overview", "Live vitals of this host — CPU, memory, disk, temperature and failed units."],
+    containers: ["Containers", "Docker containers on this host. Anyone with view rights reads logs; control actions need approval."],
+    terminal: ["Terminal", "A shell inside your own slot, fenced by your CPU and RAM limits."],
+    files: ["Files", "Your home directory. Admins can hop between slots."],
+    commands: ["Commands", "Reviewed one-shot commands. Everything runs without a shell, as your user."],
+    tunnel: ["Tunnel", "The current public URL of this panel. Share it with credentials, never alone."],
+    users: ["Users", "Accounts, per-user rights, disk / CPU / RAM limits and API tokens for bots."],
+  }[name];
+  $("#view").innerHTML = `<div class="pagehead"><h2>${meta[0]}</h2><p>${meta[1]}</p></div><div id="vbody"></div>`;
+  view = $("#vbody");
   ({ overview: vOverview, containers: vContainers, terminal: vTerminal,
      files: vFiles, commands: vCommands, tunnel: vTunnel, users: vUsers })[name]();
 }
