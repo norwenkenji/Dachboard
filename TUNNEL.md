@@ -8,29 +8,55 @@ script that prints the public URL, and the dashboard serves it at
 ## Option A: cloudflared quick tunnel (easiest, no account, URL changes)
 
 ```bash
-bash deploy/tunnel-cloudflared.sh   # -> https://xxx.trycloudflare.com
+python3 deploy/tunnel-setup.py quick
+# -> https://xxx.trycloudflare.com
 ```
 
 Default config already reads that container's logs
 (`tunnel/providers/cloudflared-quick.sh dachboard-tunnel`).
 Downside: URL changes on every container recreate — re-share the link.
 Your access-granter bot can poll `GET /api/tunnel` and forward the fresh URL.
+Fully automatic, zero credentials.
 
 ## Option B: cloudflared named tunnel (stable subdomain, free account)
 
-1. `cloudflared tunnel login`, `cloudflared tunnel create dachboard`
-2. Route a hostname to it (needs a domain on Cloudflare, free tier ok)
-3. Point the tunnel at `http://127.0.0.1:80` (nginx: `/dash/`, `/term/`)
-4. Provider: `tunnel/providers/static.sh /opt/dachboard/data/my-url.txt`
-   (write your stable URL into that file once)
+Needs a Cloudflare API token (Account/Tunnel:Edit + Zone/DNS:Edit) and a
+domain on Cloudflare. No browser — everything via API:
 
-## Option C: playit / ngrok / tailscale funnel
+```bash
+python3 deploy/tunnel-setup.py named --cf-token $CF_TOKEN --host dash.example.com
+# -> stable URL: https://dash.example.com
+```
 
-Run their agent pointing at `127.0.0.1:80`, then either:
+This creates the tunnel, sets the DNS CNAME and runs the connector.
+Then point the dashboard provider at the stable URL:
 
-- `static.sh` with your stable URL in a file, or
-- write your own 5-line provider (see `tunnel/README.md`) that queries the
-  agent's local API and prints the URL.
+```yaml
+tunnel:
+  provider: tunnel/providers/static.sh
+  args: [/opt/dachboard/data/my-url.txt]
+```
+
+```bash
+echo https://dash.example.com > /opt/dachboard/data/my-url.txt
+```
+
+Note: `--host` zone defaults to the last two labels; pass `--zone` explicitly
+for exotic TLDs (`--host a.dash.example.co.uk --zone example.co.uk`).
+
+## Option C: ngrok (stable-ish URL, token from ngrok dashboard)
+
+```bash
+python3 deploy/tunnel-setup.py ngrok --token $NGROK_TOKEN
+```
+
+Provider: `tunnel/providers/ngrok.sh` (reads the agent's local `:4040` API).
+
+## Option D: playit / tailscale funnel (manual claim)
+
+These need a browser/click to claim the agent — can't be scripted. Run their
+agent pointing at `127.0.0.1:80`, then use `static.sh` or write a 5-line
+provider (see `tunnel/README.md`).
 
 ## Asking for the fresh tunnel from any code
 
