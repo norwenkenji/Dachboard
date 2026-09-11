@@ -61,11 +61,21 @@ for slot in u-c1 u-c2 u-c3 u-c4; do
     "$REPO_DIR/deploy/systemd/dach-ttyd-slot.service.template" \
     > "/etc/systemd/system/dach-ttyd-${slot}.service"
   systemctl enable "dach-ttyd-${slot}.service" >/dev/null
-  # nginx per-slot term block
+  # nginx per-slot term + auth blocks (static X-Slot: nginx mangles
+  # query strings in auth_request on some versions, so no ?args there)
   mkdir -p /etc/nginx/dachboard
   cat > "/etc/nginx/dachboard/term-${slot}.conf" <<EOF
+location = /dash-auth-${slot} {
+    internal;
+    proxy_pass http://127.0.0.1:8420/api/auth-check;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie \$http_cookie;
+    proxy_set_header X-Target term;
+    proxy_set_header X-Slot ${slot};
+}
 location /term/${slot}/ {
-    auth_request /dash-auth?target=term&slot=${slot};
+    auth_request /dash-auth-${slot};
     proxy_pass http://127.0.0.1:${port}/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
@@ -110,8 +120,17 @@ sed -e "s/PORT/$ROOT_PORT/" \
   > /etc/systemd/system/dach-ttyd-root.service
 systemctl enable dach-ttyd-root.service >/dev/null
 cat > /etc/nginx/dachboard/term-root.conf <<EOF
+location = /dash-auth-root {
+    internal;
+    proxy_pass http://127.0.0.1:8420/api/auth-check;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie \$http_cookie;
+    proxy_set_header X-Target term;
+    proxy_set_header X-Slot root;
+}
 location /term/root/ {
-    auth_request /dash-auth?target=term&slot=root;
+    auth_request /dash-auth-root;
     proxy_pass http://127.0.0.1:${ROOT_PORT}/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;

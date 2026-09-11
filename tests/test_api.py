@@ -216,6 +216,31 @@ def test_admin_root_files_and_terminal(clients):
     assert r.status_code not in (401, 403)
 
 
+def test_auth_check_headers(clients):
+    a = clients["admin"]
+    assert a.get("/api/auth-check").status_code == 401
+    login(a, "admin")
+    r = a.get("/api/auth-check", headers={"X-Target": "term", "X-Slot": "u-c9"})
+    assert r.status_code == 204
+    bcsrf = login(clients["bob"], "bob")
+    b = clients["bob"]
+    r = b.get("/api/auth-check", headers={"X-Target": "term", "X-Slot": "u-bob"})
+    assert r.status_code == 403  # no terminal right yet
+    users = {x["login"]: x for x in a.get("/api/users").json()}
+    bid = users["bob"]["id"]
+    acsrf = login(a, "admin")
+    r = a.put(f"/api/users/{bid}",
+              json={"rights": {"overview": True, "commands_run": True, "files": True,
+                               "tunnel_view": True, "terminal": True}},
+              headers={"X-CSRF-Token": acsrf})
+    assert r.status_code == 200
+    r = b.get("/api/auth-check", headers={"X-Target": "term", "X-Slot": "u-bob"})
+    assert r.status_code == 204
+    r = b.get("/api/auth-check", headers={"X-Target": "term", "X-Slot": "root"})
+    assert r.status_code == 403
+    _ = bcsrf
+
+
 def test_containers_gating(clients):
     login(clients["bob"], "bob")
     assert clients["bob"].get("/api/containers").status_code == 403

@@ -390,7 +390,10 @@ async def first_password(request: Request):
 @app.get("/api/auth-check")
 async def auth_check(request: Request, target: str = "", slot: str = "",
                      dach_sid: str | None = Cookie(default=None)):
-    """nginx auth_request gate. 204 = pass."""
+    """nginx auth_request gate. 204 = pass. Slot comes via X-Slot header
+    (per-slot auth locations) with query fallback for direct calls."""
+    target = request.headers.get("x-target", "") or target
+    slot = request.headers.get("x-slot", "") or slot
     u = await session_user(dach_sid)
     if not u:
         return Response(status_code=401)
