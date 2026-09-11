@@ -11,8 +11,8 @@
 <body>
 <div id="setup" class="auth-wrap hidden"><div class="card">
   <div class="brand"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#131417"/><rect x="9" y="9" width="14" height="14" rx="3" fill="none" stroke="#5cb98b" stroke-width="2.5"/></svg><b>dachboard</b></div>
-  <h1>First setup</h1>
-  <p class="sub">One-time token from the server log.</p>
+  <h1 id="su-h">First setup</h1>
+  <p class="sub" id="su-sub">One-time token from the server log.</p>
   <input id="su-token" placeholder="Setup token" autocomplete="off">
   <input id="su-login" placeholder="Admin login" autocomplete="username">
   <input id="su-pass" type="password" placeholder="Password, 12+ chars" autocomplete="new-password">
@@ -25,7 +25,7 @@
   <input id="li-pass" type="password" placeholder="Password" autocomplete="current-password">
   <button id="li-go" class="primary" style="width:100%">Sign in</button>
   <div id="li-first" class="hidden">
-    <p class="sub">First login — set your own password.</p>
+    <p class="sub" id="li-sub">First login — set your own password.</p>
     <input id="li-new" type="password" placeholder="New password, 8+ chars" autocomplete="new-password">
     <button id="li-set" style="width:100%">Set &amp; sign in</button>
   </div>
@@ -35,6 +35,7 @@
   <header class="top">
     <div class="brand"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#131417"/><rect x="9" y="9" width="14" height="14" rx="3" fill="none" stroke="#5cb98b" stroke-width="2.5"/></svg><b>dachboard</b></div>
     <nav class="tabs" id="tabs"></nav>
+    <button id="lang" class="ghost" title="language">EN</button>
     <span id="me"></span>
     <button id="logout" class="ghost" title="Sign out"></button>
   </header>

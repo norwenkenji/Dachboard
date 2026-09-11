@@ -27,10 +27,16 @@ sudo journalctl -u dachboard -n 5 | grep "SETUP TOKEN"
 # open http://127.0.0.1:8420 → first-setup card → create admin
 ```
 
-Then expose it: see [TUNNEL.md](TUNNEL.md) for free tunnel options
+Then expose it: see [docs/TUNNEL.md](docs/TUNNEL.md) for free tunnel options
 (cloudflared quick/named, playit, ngrok, tailscale). The dashboard shows its
 own public URL at `GET /api/tunnel` once a provider is wired in
 `config.yaml`.
+
+## Docs
+
+- [docs/TUNNEL.md](docs/TUNNEL.md) · [docs/TUNNEL.ru.md](docs/TUNNEL.ru.md) — tunnels
+- [docs/PROVIDERS.md](docs/PROVIDERS.md) · [docs/PROVIDERS.ru.md](docs/PROVIDERS.ru.md) — tunnel providers
+- [docs/README.ru.md](docs/README.ru.md) — русская документация
 
 Next: create users in the UI (Users tab): login + temp password + slot
 (`u-c1`…) + rights checkboxes + limits. The user sets their own password on

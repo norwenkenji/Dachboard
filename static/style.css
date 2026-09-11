@@ -115,6 +115,29 @@ main h3 { font-size: 12px; font-weight: 650; letter-spacing: 0.08em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ok { color: var(--acc); } .bad { color: var(--danger); }
 .dim { color: var(--dim); } .faint { color: var(--faint); }
+
+/* vitals panel: rows + meters, no tiles */
+.panel { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 6px 16px; }
+.vrow { display: grid; grid-template-columns: 110px 1fr minmax(180px, auto);
+  gap: 14px; align-items: center; padding: 11px 0;
+  border-bottom: 1px solid var(--line); }
+.vrow:last-child { border-bottom: 0; }
+.vk { color: var(--faint); font-size: 12px; font-weight: 650;
+  letter-spacing: 0.08em; text-transform: uppercase; }
+.vv { font-size: 13.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.meter { height: 6px; background: var(--inset); border: 1px solid var(--line);
+  border-radius: 4px; overflow: hidden; min-width: 80px; }
+.meter i { display: block; height: 100%; background: var(--acc); border-radius: 3px;
+  transition: width 0.4s ease; }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 2px 20px; width: 100%; }
+.trow { display: flex; justify-content: space-between; gap: 12px;
+  padding: 3px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.trow span { color: var(--dim); font-family: var(--mono); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow b { font-variant-numeric: tabular-nums; font-weight: 600; }
+#lang { font-weight: 700; font-size: 12px; letter-spacing: 0.06em; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--faint); margin-right: 7px; vertical-align: 1px; }
 .dot.on { background: var(--acc); }
@@ -148,7 +171,9 @@ iframe.term { width: 100%; height: 68vh; min-height: 420px;
 .url-big { font-family: var(--mono); font-size: 15px; word-break: break-all; }
 
 @media (max-width: 640px) {
-  header.top { flex-wrap: wrap; }
+  header.top { flex-wrap: wrap; min-height: 0; padding-bottom: 8px; }
   header.top #me { margin-left: 0; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .vrow { grid-template-columns: 86px 1fr; }
+  .vrow .vv { grid-column: 2; text-align: left; }
 }

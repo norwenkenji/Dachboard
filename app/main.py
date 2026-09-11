@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import getpass
 import json
+import re
 import secrets
 import subprocess
 import time
@@ -330,6 +331,18 @@ async def me(dach_sid: str | None = Cookie(default=None)):
     return u
 
 
+@app.get("/api/csrf")
+async def csrf(dach_sid: str | None = Cookie(default=None)):
+    """Restore CSRF token after page reload (session cookie survives, JS state doesn't)."""
+    if not dach_sid:
+        raise HTTPException(401, "no session")
+    with closing(D.connect(DB)) as con:
+        r = con.execute("SELECT csrf FROM sessions WHERE token=?", (dach_sid,)).fetchone()
+        if not r:
+            raise HTTPException(401, "no session")
+        return {"csrf": r["csrf"]}
+
+
 @app.post("/api/me/password")
 async def me_password(request: Request, dach_sid: str | None = Cookie(default=None)):
     u = await session_user(dach_sid)
@@ -417,6 +430,33 @@ async def services(dach_sid: str | None = Cookie(default=None)):
             units.append({"unit": parts[0], "load": parts[1],
                           "active": parts[2], "desc": " ".join(parts[4:])})
     return units
+
+
+UNIT_RE = re.compile(r"^[A-Za-z0-9@.:_-]+\.(service|socket|timer|target)$")
+
+
+@app.get("/api/services/{name}/logs")
+async def service_logs(name: str, tail: int = 200,
+                       dach_sid: str | None = Cookie(default=None)):
+    await require("containers_view", dach_sid)
+    if not UNIT_RE.match(name):
+        raise HTTPException(400, "bad unit name")
+    code, out = await asyncio.to_thread(
+        R.run_as, ["journalctl", "-u", name, "-n", str(max(1, min(tail, 1000))),
+                   "--no-pager"], None, 20)
+    return {"logs": out[-100_000:]}
+
+
+@app.post("/api/services/{name}/{action}")
+async def service_action(name: str, action: str, request: Request,
+                         dach_sid: str | None = Cookie(default=None)):
+    await require("containers_control", dach_sid)
+    check_csrf(request, dach_sid)
+    if not UNIT_RE.match(name) or action not in ("start", "stop", "restart"):
+        raise HTTPException(400, "bad unit or action")
+    code, out = await asyncio.to_thread(
+        R.run_as, ["systemctl", action, name], None, 60)
+    return {"code": code, "output": out[-4000:]}
 
 
 # ---------- containers ----------

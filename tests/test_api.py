@@ -171,6 +171,30 @@ def test_terminal_gating(clients):
     assert r.status_code not in (401, 403)
 
 
+def test_csrf_restore(clients):
+    login(clients["bob"], "bob")
+    r = clients["bob"].get("/api/csrf")
+    assert r.status_code == 200 and len(r.json()["csrf"]) > 10
+    assert clients["admin"].get("/api/csrf").status_code == 401
+
+
+def test_service_logs_and_action(clients):
+    acsrf = login(clients["admin"], "admin")
+    a = clients["admin"]
+    r = a.get("/api/services/cron.service/logs")
+    assert r.status_code == 200 and isinstance(r.json()["logs"], str)
+    r = a.get("/api/services/evil;rm/logs")
+    assert r.status_code == 400
+    bcsrf = login(clients["bob"], "bob")
+    b = clients["bob"]
+    r = b.post("/api/services/cron.service/restart",
+               headers={"X-CSRF-Token": bcsrf})
+    assert r.status_code == 403
+    r = a.post("/api/services/cron.service/frobnicate",
+               headers={"X-CSRF-Token": acsrf})
+    assert r.status_code == 400
+
+
 def test_containers_gating(clients):
     login(clients["bob"], "bob")
     assert clients["bob"].get("/api/containers").status_code == 403
