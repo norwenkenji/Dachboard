@@ -30,10 +30,11 @@ def test_ngrok_pattern():
 
 def test_term_client_template():
     import pathlib
-    tpl = pathlib.Path("term/client.template.html").read_text()
-    for ph in ("__XTERM_CSS__", "__XTERM_JS__", "__FIT_JS__"):
-        assert ph in tpl
-    for token in ('"tty"', "AuthToken", "columns", "rows", "xterm-viewport"):
+    tpl = pathlib.Path("term/client.html").read_text()
+    # no server-side placeholders: vendor loads itself, works under any prefix
+    assert "__XTERM_" not in tpl and "__FIT_" not in tpl
+    for token in ('"tty"', "AuthToken", "columns", "rows", "xterm-viewport",
+                  "/static/term/", "xterm.js", "addon-fit.js"):
         assert token in tpl
 
 

@@ -50,33 +50,22 @@ chmod +x "$DACH"/tunnel/providers/*.sh
 "$DACH/.venv/bin/pip" install -q -r "$DACH/requirements.txt"
 
 # --- terminal web client: own xterm page (falls back to ttyd default) ---
+# vendor is served by the dashboard itself (/static/term/*), client.html
+# loads it relative to the dashboard prefix, so no inlining needed.
 XTERM_VER=5.5.0
 FIT_VER=0.10.0
 TERM_INDEX=""
-mkdir -p "$DACH/term"
-dl_ok=""
+mkdir -p "$DACH/term" "$DACH/static/term"
 dl() { curl -sL --max-time 90 "$1" -o "$2" && [ -s "$2" ]; }
-if dl "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VER}/lib/xterm.js" "$DACH/term/xterm.js" \
-&& dl "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VER}/css/xterm.css" "$DACH/term/xterm.css" \
-&& dl "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${FIT_VER}/lib/addon-fit.js" "$DACH/term/addon-fit.js"; then
-  if python3 - "$REPO_DIR/term/client.template.html" "$DACH/term" <<'EOF'; then
-import sys
-tpl, outdir = sys.argv[1], sys.argv[2]
-page = open(tpl).read()
-for key, name in (("__XTERM_CSS__", "xterm.css"), ("__XTERM_JS__", "xterm.js"),
-                  ("__FIT_JS__", "addon-fit.js")):
-    with open(f"{outdir}/{name}") as f:
-        page = page.replace(key, f.read(), 1)
-assert "__XTERM_" not in page and "__FIT_" not in page, "placeholders left"
-open(f"{outdir}/index.html", "w").write(page)
-print("term client built")
-EOF
-    TERM_INDEX="--index $DACH/term/index.html"
-  else
-    echo "term client build failed, ttyd default page"
-  fi
+if dl "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VER}/lib/xterm.js" "$DACH/static/term/xterm.js" \
+&& dl "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VER}/css/xterm.css" "$DACH/static/term/xterm.css" \
+&& dl "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${FIT_VER}/lib/addon-fit.js" "$DACH/static/term/addon-fit.js" \
+&& cp "$REPO_DIR/term/client.html" "$DACH/term/index.html" \
+&& cp "$REPO_DIR/term/tmux.conf" "$DACH/term/tmux.conf"; then
+  TERM_INDEX="--index $DACH/term/index.html"
+  echo "custom terminal client on"
 else
-  echo "xterm download failed, ttyd default page"
+  echo "term client vendoring failed, ttyd default page"
 fi
 
 # --- user slots ---
