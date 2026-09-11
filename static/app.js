@@ -410,6 +410,9 @@ async function vConsole() {
   view.innerHTML = `<p class="dim">${t("loading")}</p>`;
   const canRun = has("commands_run"), canTerm = has("terminal");
   let html = "";
+  if (canTerm) {
+    html += `<h3>${ic("term")}${t("term_t")}</h3><div id="term-slot"><p class="dim">${t("term_starting")}</p></div>`;
+  }
   if (canRun) {
     const list = await api("/api/commands");
     const runs = await api("/api/runs");
@@ -428,9 +431,6 @@ async function vConsole() {
       <div class="row"><button id="c-add" class="primary">${ic("plus")}${t("add_cmd")}</button></div>
       <div id="c-list"></div>`;
     }
-  }
-  if (canTerm) {
-    html += `<h3>${ic("term")}${t("term_t")}</h3><div id="term-slot"><p class="dim">${t("term_starting")}</p></div>`;
   }
   view.innerHTML = html || `<p class="dim">—</p>`;
   if (canRun) {
@@ -465,12 +465,28 @@ async function vConsole() {
     try {
       const r = await api("/api/terminal/ensure", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: "{}" });
+      const label = r.slot === "root" ? "system · root" : r.slot;
       $("#term-slot").innerHTML =
-        `<p class="dim"><span class="mono">${esc(r.slot === "root" ? "system · root" : r.slot)}</span> · 127.0.0.1:${r.port}</p>
-         <iframe class="term" src="/term/${esc(r.slot)}/" title="terminal"></iframe>`;
+        `<p class="dim"><span class="mono">${esc(label)}</span> · 127.0.0.1:${r.port}</p>
+         <iframe id="term-frame" class="term" src="/term/${esc(r.slot)}/" title="terminal"></iframe>`;
+      // same-origin iframe: restyle ttyd's native scrollbar + bg to match
+      $("#term-frame").onload = () => {
+        try {
+          const d = $("#term-frame").contentDocument;
+          const s = d.createElement("style");
+          s.textContent = ".xterm-viewport{scrollbar-width:thin;scrollbar-color:#2e3238 transparent}"
+            + ".xterm-viewport::-webkit-scrollbar{width:10px;height:10px}"
+            + ".xterm-viewport::-webkit-scrollbar-track{background:transparent}"
+            + ".xterm-viewport::-webkit-scrollbar-thumb{background:#2e3238;border-radius:6px;border:2px solid #000}"
+            + ".xterm-viewport::-webkit-scrollbar-thumb:hover{background:#3d434b}"
+            + ".xterm-screen,.xterm-viewport{background-color:#0b0e0c !important}";
+          d.head.appendChild(s);
+        } catch (e) { /* cross-origin: leave default */ }
+      };
     } catch (e) {
       $("#term-slot").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
     }
+    return;
   }
 }
 

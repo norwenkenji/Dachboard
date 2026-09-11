@@ -74,12 +74,18 @@ location = /dash-auth-${slot} {
     proxy_set_header X-Target term;
     proxy_set_header X-Slot ${slot};
 }
+# interactive shell: no buffering, no Nagle, long-lived socket
 location /term/${slot}/ {
     auth_request /dash-auth-${slot};
     proxy_pass http://127.0.0.1:${port}/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    tcp_nodelay on;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
 }
 EOF
 done
@@ -135,6 +141,11 @@ location /term/root/ {
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    tcp_nodelay on;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
 }
 EOF
 
