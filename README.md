@@ -37,6 +37,28 @@ Next: create users in the UI (Users tab): login + temp password + slot
 first login. Hand them the tunnel URL + credentials any way you like
 (Telegram bot, QR, …) — that integration lives outside this repo.
 
+## Upgrade
+
+Re-run the installer — it preserves `config.yaml`, the database and
+`.secret`, refreshes code/venv/units, then restart the service:
+
+```bash
+cd /root/dachboard-src && git pull && sudo bash deploy/install.sh
+sudo systemctl restart dachboard.service
+```
+
+## Troubleshooting
+
+- `install.sh` needs root, Debian/Ubuntu, python ≥ 3.10. Docker optional
+  (containers page stays empty without it).
+- Non-ext4 `/` → hard quotas skipped with a warning; usage-vs-limit still shown.
+- Port `127.0.0.1:80` taken by another vhost → change `listen` in
+  `deploy/nginx/dachboard.conf` (and the tunnel target) before installing.
+- No GitHub access for ttyd download → install the `ttyd` binary manually to
+  `/usr/local/bin/ttyd` and re-run the installer.
+- Lost admin access: delete the admin row from SQLite and restart — a fresh
+  one-time setup token appears in the journal (requires server shell).
+
 ## Layout
 
 ```
