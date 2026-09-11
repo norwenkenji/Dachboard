@@ -430,12 +430,7 @@ async function vConsole() {
     }
   }
   if (canTerm) {
-    const needPick = ME.is_admin && !ME.slot;
-    html += `<h3>${ic("term")}${t("term_t")}</h3>` + (needPick
-      ? `<div class="row"><input id="t-slot" placeholder="${t("term_slot_ph")}" style="max-width:180px">
-         <button id="t-open" class="primary">${ic("play")}${t("term_open")}</button></div>
-         <div id="term-slot"></div>`
-      : `<div id="term-slot"><p class="dim">${t("term_starting")}</p></div>`);
+    html += `<h3>${ic("term")}${t("term_t")}</h3><div id="term-slot"><p class="dim">${t("term_starting")}</p></div>`;
   }
   view.innerHTML = html || `<p class="dim">—</p>`;
   if (canRun) {
@@ -467,46 +462,26 @@ async function vConsole() {
     }
   }
   if (canTerm) {
-    const startTerm = async (slot) => {
-      try {
-        const r = await api("/api/terminal/ensure", { method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(slot ? { slot } : {}) });
-        $("#term-slot").innerHTML =
-          `<p class="dim"><span class="mono">${esc(r.slot)}</span> · 127.0.0.1:${r.port}</p>
-           <iframe class="term" src="/term/${esc(r.slot)}/" title="terminal"></iframe>`;
-      } catch (e) {
-        $("#term-slot").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
-      }
-    };
-    if (ME.is_admin && !ME.slot) {
-      $("#t-open").onclick = () => {
-        const s = $("#t-slot").value.trim();
-        if (!s) return;
-        $("#term-slot").innerHTML = `<p class="dim">${t("term_starting")}</p>`;
-        startTerm(s);
-      };
-    } else {
-      startTerm(null);
+    try {
+      const r = await api("/api/terminal/ensure", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: "{}" });
+      $("#term-slot").innerHTML =
+        `<p class="dim"><span class="mono">${esc(r.slot === "root" ? "system · root" : r.slot)}</span> · 127.0.0.1:${r.port}</p>
+         <iframe class="term" src="/term/${esc(r.slot)}/" title="terminal"></iframe>`;
+    } catch (e) {
+      $("#term-slot").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
     }
   }
 }
 
 /* ---- files ---- */
-let fPath = "", fSlot = "";
+let fPath = "";
 async function vFiles() {
   view.innerHTML = `<p class="dim">${t("loading")}</p>`;
   await fRender();
 }
 async function fRender() {
-  if (ME.is_admin && !fSlot) {
-    view.innerHTML = `<div class="row"><input id="f-slot" placeholder="${t("slot_ph")}" style="max-width:180px">
-      <button id="f-go" class="primary">${t("open")}</button></div>
-      <p class="dim">${t("pick_slot")}</p>`;
-    $("#f-go").onclick = () => { fSlot = $("#f-slot").value.trim(); fPath = ""; fRender(); };
-    return;
-  }
-  const q = `?path=${encodeURIComponent(fPath)}${fSlot ? `&slot=${fSlot}` : ""}`;
+  const q = `?path=${encodeURIComponent(fPath)}`;
   let list;
   try {
     list = await api("/api/files" + q);
@@ -514,11 +489,10 @@ async function fRender() {
     view.innerHTML = `<p class="bad">${esc(e.message)}</p>`;
     return;
   }
-  const quota = await api("/api/quota" + (fSlot ? `?slot=${fSlot}` : "")).catch(() => null);
+  const quota = await api("/api/quota").catch(() => null);
   view.innerHTML = `
-    ${ME.is_admin ? `<div class="row"><input id="f-slot" value="${esc(fSlot)}" placeholder="${t("slot_ph")}" style="max-width:160px">
-      <button id="f-go">${t("open")}</button></div>` : ""}
-    <div class="row"><span class="path">/${esc(fPath)}</span>
+    <div class="row"><input id="f-path" value="/${esc(fPath)}" spellcheck="false" style="max-width:280px">
+      <button id="f-go">${t("open")}</button>
       ${quota ? `<span class="dim">${(quota.used / 1048576).toFixed(0)} MiB ${t("used")}${quota.limit ? " · " + t("limit") + " " + esc(quota.limit) : ""}</span>` : ""}
     </div>
     <table><tbody>
@@ -531,12 +505,15 @@ async function fRender() {
       <button id="f-mkf">${ic("plus")}${t("file_btn")}</button><button id="f-mkd">${ic("plus")}${t("folder_btn")}</button></div>
     <div id="f-edit" class="hidden"><textarea id="f-text" spellcheck="false"></textarea>
       <div class="row"><button id="f-save" class="primary">${ic("check")}${t("save")}</button></div></div>`;
-  if (ME.is_admin) $("#f-go").onclick = () => { fSlot = $("#f-slot").value.trim(); fPath = ""; fRender(); };
+  $("#f-go").onclick = () => {
+    fPath = $("#f-path").value.replace(/^\/+/, "").replace(/\/+$/, "");
+    fRender();
+  };
   view.querySelectorAll("[data-p]").forEach((a) => a.onclick = async (ev) => {
     ev.preventDefault();
     if (a.dataset.d === "1") { fPath = a.dataset.p; fRender(); }
     else {
-      const r = await api(`/api/files/read?path=${encodeURIComponent(a.dataset.p)}${fSlot ? `&slot=${fSlot}` : ""}`);
+      const r = await api(`/api/files/read?path=${encodeURIComponent(a.dataset.p)}`);
       $("#f-edit").classList.remove("hidden");
       $("#f-text").value = r.content; $("#f-text").dataset.p = a.dataset.p;
       $("#f-text").focus();
@@ -549,24 +526,24 @@ async function fRender() {
     if (!confirm(t("del_q") + " " + b.dataset.del + "?")) return;
     await api("/api/files/delete", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: fPath ? fPath + "/" + b.dataset.del : b.dataset.del, slot: fSlot }) });
+      body: JSON.stringify({ path: fPath ? fPath + "/" + b.dataset.del : b.dataset.del }) });
     fRender();
   });
   $("#f-mkf").onclick = async () => {
     const n = $("#f-new").value.trim(); if (!n) return;
     await api("/api/files/write", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: fPath ? fPath + "/" + n : n, content: "", slot: fSlot }) });
+      body: JSON.stringify({ path: fPath ? fPath + "/" + n : n, content: "" }) });
     fRender();
   };
   $("#f-mkd").onclick = async () => {
     const n = $("#f-new").value.trim(); if (!n) return;
     await api("/api/files/mkdir", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: fPath ? fPath + "/" + n : n, slot: fSlot }) });
+      body: JSON.stringify({ path: fPath ? fPath + "/" + n : n }) });
     fRender();
   };
   $("#f-save").onclick = async () => {
     await api("/api/files/write", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: $("#f-text").dataset.p, content: $("#f-text").value, slot: fSlot }) });
+      body: JSON.stringify({ path: $("#f-text").dataset.p, content: $("#f-text").value }) });
     $("#f-save").innerHTML = ic("check") + t("saved");
     setTimeout(() => { const b = $("#f-save"); if (b) b.innerHTML = ic("check") + t("save"); }, 1500);
   };

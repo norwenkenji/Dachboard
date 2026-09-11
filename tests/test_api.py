@@ -210,6 +210,10 @@ def test_admin_root_files_and_terminal(clients):
     r = a.post("/api/terminal/ensure", json={"slot": "root"},
                headers={"X-CSRF-Token": csrf})
     assert r.status_code not in (401, 403)
+    # no slot exposed: admin defaults to root shell
+    r = a.post("/api/terminal/ensure", json={},
+               headers={"X-CSRF-Token": csrf})
+    assert r.status_code not in (401, 403)
 
 
 def test_containers_gating(clients):

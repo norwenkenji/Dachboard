@@ -720,7 +720,8 @@ async def terminal_ensure(request: Request, dach_sid: str | None = Cookie(defaul
     u = await require("terminal", dach_sid)
     check_csrf(request, dach_sid)
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
-    slot = body.get("slot") or u["slot"]
+    # no slot exposed outside: admin lands in root, others in their own slot
+    slot = body.get("slot") or u["slot"] or ("root" if u["is_admin"] else None)
     if slot == "root" and not u["is_admin"]:
         raise HTTPException(403, "admin only")
     if not u["is_admin"] and slot != (u["slot"] or ""):
