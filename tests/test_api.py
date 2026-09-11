@@ -122,7 +122,7 @@ def test_files_flow(clients, env):
                json={"path": "note.txt", "content": "kent-was-here"},
                headers={"X-CSRF-Token": csrf})
     assert r.status_code == 200
-    rows = b.get("/api/files").json()
+    rows = b.get("/api/files").json()["entries"]
     assert [x["name"] for x in rows] == ["note.txt"]
     r = b.get("/api/files/read", params={"path": "note.txt"})
     assert r.json()["content"] == "kent-was-here"
@@ -203,8 +203,9 @@ def test_files_move_copy_api(clients):
                   json={"path": "m.txt", "content": "mv"}, headers=h).status_code == 200
     r = b.post("/api/files/move", json={"path": "m.txt", "to": "m2.txt"}, headers=h)
     assert r.status_code == 200
-    rows = b.get("/api/files").json()
-    assert [x["name"] for x in rows] == ["m2.txt"]
+    body = b.get("/api/files").json()
+    assert [x["name"] for x in body["entries"]] == ["m2.txt"]
+    assert body["quota"]["used"] >= 0
     r = b.post("/api/files/copy", json={"path": "m2.txt", "to": "m3.txt"}, headers=h)
     assert r.status_code == 200
     r = b.post("/api/files/move", json={"path": "m2.txt", "to": "../x"}, headers=h)
@@ -218,7 +219,8 @@ def test_admin_root_files_and_terminal(clients):
     a = clients["admin"]
     # admin without slot sees the whole filesystem
     r = a.get("/api/files")
-    assert r.status_code == 200 and isinstance(r.json(), list)
+    body = r.json()
+    assert r.status_code == 200 and isinstance(body["entries"], list)
     # non-admin may not take root shell
     bcsrf = login(clients["bob"], "bob")
     r = clients["bob"].post("/api/terminal/ensure", json={"slot": "root"},

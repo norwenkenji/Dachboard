@@ -493,11 +493,21 @@ async def containers_action(name: str, action: str, request: Request,
 @app.get("/api/files")
 async def files_list(path: str = "", slot: str = "",
                      dach_sid: str | None = Cookie(default=None)):
+    """Single round trip: entries + quota together (tunnel latency matters)."""
     u = await require("files", dach_sid)
     try:
-        return F.list_dir(home_of(u, slot or None), path)
+        root = home_of(u, slot or None)
+        entries = F.list_dir(root, path)
     except (PermissionError, NotADirectoryError, OSError) as e:
         raise HTTPException(400, str(e))
+    if str(root) == "/":
+        from . import metrics as _M
+        d = _M.disk("/")
+        quota = {"used": d["used"], "limit": None}
+    else:
+        used = await asyncio.to_thread(F.disk_usage, root)
+        quota = {"used": used, "limit": (u.get("limits") or {}).get("disk_quota")}
+    return {"entries": entries, "quota": quota}
 
 
 @app.get("/api/files/read")

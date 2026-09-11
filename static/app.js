@@ -550,6 +550,8 @@ async function vConsole() {
 let fPath = "";
 let fClip = null; // {mode:"cut"|"copy", src}
 let fSel = null;
+const fCache = new Map(); // path -> {ts, list, quota}; busted on every mutation
+const fBust = () => fCache.clear();
 
 const EXT_ICON = (() => {
   const groups = {
@@ -673,15 +675,23 @@ async function vFiles() {
 
 async function fRender() {
   const q = `?path=${encodeURIComponent(fPath)}`;
-  let list;
-  try {
-    list = await api("/api/files" + q);
-  } catch (e) {
-    view.innerHTML = `<p class="bad">${esc(e.message)}</p>`;
-    return;
+  let list, quota;
+  const hit = fCache.get(fPath);
+  if (hit && Date.now() - hit.ts < 5000) {
+    list = hit.list;
+    quota = hit.quota;
+  } else {
+    try {
+      const r = await api("/api/files" + q);
+      list = r.entries;
+      quota = r.quota;
+      fCache.set(fPath, { ts: Date.now(), list, quota });
+      if (fCache.size > 40) fCache.delete(fCache.keys().next().value);
+    } catch (e) {
+      view.innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+      return;
+    }
   }
-  list.sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name));
-  const quota = await api("/api/quota").catch(() => null);
   const parts = fPath ? fPath.split("/") : [];
   let crumbs = `<button data-crumb="" title="/">${ic("folder")}</button>`;
   crumbs += parts.map((p, i) =>
@@ -724,6 +734,7 @@ async function fRender() {
       method: "POST", headers: CSRF ? { "X-CSRF-Token": CSRF } : {}, body: fd,
     });
     if (!r.ok) alert((await r.text()).slice(0, 200));
+    fBust();
     fRender();
   };
   $("#f-paste").onclick = doPaste;
@@ -793,6 +804,7 @@ async function doDelete(name) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: relOf(target) }) });
   if (fSel === target) fSel = null;
+  fBust();
   fRender();
 }
 
@@ -806,6 +818,7 @@ async function doPaste() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: fClip.src, to: dst }) });
   fClip = null;
+  fBust();
   fRender();
 }
 
@@ -824,6 +837,7 @@ function inlineRename(name) {
         body: JSON.stringify({ path: relOf(name), to: fPath ? fPath + "/" + nn : nn }) });
       if (fSel === name) fSel = nn;
     }
+    fBust();
     fRender();
   };
   inp.onkeydown = (e) => {
@@ -857,6 +871,7 @@ function inlineCreate(isDir) {
       }
       fSel = nn;
     }
+    fBust();
     fRender();
   };
   inp.onkeydown = (e) => {
