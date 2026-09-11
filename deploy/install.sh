@@ -20,8 +20,8 @@ command -v nginx >/dev/null || echo "note: no nginx — install it for /term/ ga
 
 # --- packages ---
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv nginx curl unzip quota 2>/dev/null || \
-apt-get install -y -qq python3 python3-venv nginx curl unzip
+apt-get install -y -qq python3 python3-venv nginx curl unzip tmux quota 2>/dev/null || \
+apt-get install -y -qq python3 python3-venv nginx curl unzip tmux
 
 # --- ttyd binary ---
 if [ ! -x /usr/local/bin/ttyd ]; then

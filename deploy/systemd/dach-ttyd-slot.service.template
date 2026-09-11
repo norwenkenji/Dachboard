@@ -9,7 +9,7 @@ StartLimitIntervalSec=0
 Type=simple
 User=%i
 WorkingDirectory=/home/%i
-ExecStart=/usr/local/bin/ttyd -i 127.0.0.1 -p PORT --writable bash
+ExecStart=/usr/local/bin/ttyd -i 127.0.0.1 -p PORT --writable tmux -L dach-%i new -A -s main
 Restart=always
 RestartSec=3
 

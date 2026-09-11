@@ -465,8 +465,10 @@ async function vConsole() {
   }
   if (canTerm) {
     const paintTerm = (slot, port) => {
+      const host = $("#term-slot");
+      if (!host) return; // user switched tabs mid-flight
       const label = slot === "root" ? "system · root" : slot;
-      $("#term-slot").innerHTML =
+      host.innerHTML =
         `<div class="termbar"><span class="mono">${esc(label)} · 127.0.0.1:${port}</span>
          <span class="sp"></span>
          <button id="t-recon" class="ghost" title="${t("reconnect")}">${ic("refresh")}${t("reconnect")}</button>
@@ -489,10 +491,12 @@ async function vConsole() {
     const styleTermFrame = () => {
       const f = $("#term-frame");
       if (!f) return;
-      f.onload = () => {
+      const inject = () => {
         try {
           const d = f.contentDocument;
+          if (!d || d.querySelector("#dach-term-css")) return;
           const s = d.createElement("style");
+          s.id = "dach-term-css";
           s.textContent = ".xterm-viewport{scrollbar-width:thin;scrollbar-color:#2e3238 transparent}"
             + ".xterm-viewport::-webkit-scrollbar{width:10px;height:10px}"
             + ".xterm-viewport::-webkit-scrollbar-track{background:transparent}"
@@ -502,13 +506,19 @@ async function vConsole() {
           d.head.appendChild(s);
         } catch (e) { /* cross-origin: leave default */ }
       };
+      f.onload = inject;
+      // cached iframe may already be complete before onload attaches
+      try {
+        if (f.contentDocument && f.contentDocument.readyState === "complete") inject();
+      } catch (e) { /* not ready yet, onload will fire */ }
     };
     try {
       const r = await api("/api/terminal/ensure", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: "{}" });
       paintTerm(r.slot, r.port);
     } catch (e) {
-      $("#term-slot").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+      const host = $("#term-slot");
+      if (host) host.innerHTML = `<p class="bad">${esc(e.message)}</p>`;
     }
   }
 }
