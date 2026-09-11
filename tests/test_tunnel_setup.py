@@ -28,6 +28,15 @@ def test_ngrok_pattern():
     assert m.group(0) == "https://abcd-1-2-3.ngrok-free.app"
 
 
+def test_term_client_template():
+    import pathlib
+    tpl = pathlib.Path("term/client.template.html").read_text()
+    for ph in ("__XTERM_CSS__", "__XTERM_JS__", "__FIT_JS__"):
+        assert ph in tpl
+    for token in ('"tty"', "AuthToken", "columns", "rows", "xterm-viewport"):
+        assert token in tpl
+
+
 def test_quick_pattern():
     sample = "2026/01/01 INF + https://gmbh-forests-golden-gods.trycloudflare.com"
     m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com[^ \"']*", sample)

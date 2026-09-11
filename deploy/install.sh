@@ -49,6 +49,36 @@ chmod +x "$DACH"/tunnel/providers/*.sh
 "$DACH/.venv/bin/pip" install -q --upgrade pip
 "$DACH/.venv/bin/pip" install -q -r "$DACH/requirements.txt"
 
+# --- terminal web client: own xterm page (falls back to ttyd default) ---
+XTERM_VER=5.5.0
+FIT_VER=0.10.0
+TERM_INDEX=""
+mkdir -p "$DACH/term"
+dl_ok=""
+dl() { curl -sL --max-time 90 "$1" -o "$2" && [ -s "$2" ]; }
+if dl "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VER}/lib/xterm.js" "$DACH/term/xterm.js" \
+&& dl "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VER}/css/xterm.css" "$DACH/term/xterm.css" \
+&& dl "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${FIT_VER}/lib/addon-fit.js" "$DACH/term/addon-fit.js"; then
+  if python3 - "$REPO_DIR/term/client.template.html" "$DACH/term" <<'EOF'; then
+import sys
+tpl, outdir = sys.argv[1], sys.argv[2]
+page = open(tpl).read()
+for key, name in (("__XTERM_CSS__", "xterm.css"), ("__XTERM_JS__", "xterm.js"),
+                  ("__FIT_JS__", "addon-fit.js")):
+    with open(f"{outdir}/{name}") as f:
+        page = page.replace(key, f.read(), 1)
+assert "__XTERM_" not in page and "__FIT_" not in page, "placeholders left"
+open(f"{outdir}/index.html", "w").write(page)
+print("term client built")
+EOF
+    TERM_INDEX="--index $DACH/term/index.html"
+  else
+    echo "term client build failed, ttyd default page"
+  fi
+else
+  echo "xterm download failed, ttyd default page"
+fi
+
 # --- user slots ---
 i=0
 for slot in u-c1 u-c2 u-c3 u-c4; do
@@ -58,7 +88,7 @@ for slot in u-c1 u-c2 u-c3 u-c4; do
   fi
   port=$((PORT_BASE + i)); i=$((i + 1))
   # per-slot ttyd unit
-  sed -e "s/%i/$slot/g" -e "s/PORT/$port/" \
+  sed -e "s/%i/$slot/g" -e "s/PORT/$port/" -e "s|INDEX|$TERM_INDEX|" \
     "$REPO_DIR/deploy/systemd/dach-ttyd-slot.service.template" \
     > "/etc/systemd/system/dach-ttyd-${slot}.service"
   systemctl enable "dach-ttyd-${slot}.service" >/dev/null
@@ -122,7 +152,7 @@ fi
 
 # --- root shell unit + nginx block (admin only, gated by dashboard session) ---
 ROOT_PORT=$((PORT_BASE - 1))
-sed -e "s/PORT/$ROOT_PORT/" \
+sed -e "s/PORT/$ROOT_PORT/" -e "s|INDEX|$TERM_INDEX|" \
   "$REPO_DIR/deploy/systemd/dach-ttyd-root.service.template" \
   > /etc/systemd/system/dach-ttyd-root.service
 systemctl enable dach-ttyd-root.service >/dev/null
