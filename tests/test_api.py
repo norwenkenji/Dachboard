@@ -55,6 +55,22 @@ def test_admin_users_crud(clients):
     assert r.status_code == 200
 
 
+def test_rename_login(clients):
+    csrf = login(clients["admin"], "admin")
+    a = clients["admin"]
+    me = a.get("/api/me").json()
+    r = a.put(f"/api/users/{me['id']}", json={"login": "rxzwu"},
+              headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 200
+    assert a.get("/api/me").json()["login"] == "rxzwu"
+    r = a.put(f"/api/users/{me['id']}", json={"login": "bob"},
+              headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 400
+    r = a.put(f"/api/users/{me['id']}", json={"login": "admin"},
+              headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 200
+
+
 def test_users_validation(clients):
     csrf = login(clients["admin"], "admin")
     c = clients["admin"]

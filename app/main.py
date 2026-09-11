@@ -801,6 +801,16 @@ async def users_update(uid: int, request: Request,
     check_csrf(request, dach_sid)
     body = await request.json()
     sets, vals = [], []
+    if "login" in body:
+        login = str(body["login"]).strip()
+        if not login or len(login) > 32:
+            raise HTTPException(400, "bad login")
+        with closing(D.connect(DB)) as con:
+            r = con.execute("SELECT id FROM users WHERE login=?", (login,)).fetchone()
+            if r and r["id"] != uid:
+                raise HTTPException(400, "login taken")
+        sets.append("login=?")
+        vals.append(login)
     if "rights" in body:
         sets.append("rights=?")
         vals.append(json.dumps({r: bool(body["rights"].get(r, False)) for r in RIGHTS}))
