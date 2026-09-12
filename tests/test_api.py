@@ -115,6 +115,34 @@ def test_commands_flow(clients):
     assert r.status_code == 200
 
 
+def test_commands_run_inside_container(clients, monkeypatch):
+    # slot WITH a container -> docker exec path, not runuser/slice
+    acsrf = login(clients["admin"], "admin")
+    bcsrf = login(clients["bob"], "bob")
+    a, b = clients["admin"], clients["bob"]
+    monkeypatch.setattr("app.slots.container_exists",
+                        lambda slot: slot == "u-bob")
+    seen = {}
+
+    def fake_exec(slot, argv, timeout=60):
+        seen.update(slot=slot, argv=list(argv))
+        return 0, "in-container-ok"
+
+    monkeypatch.setattr("app.runner.exec_in", fake_exec)
+    argv = [sys.executable, "-c", "print('ran-ok')"]
+    r = a.post("/api/commands",
+               json={"name": "inbox", "argv": argv, "run_as": "owner",
+                     "allowed": [2], "timeout_sec": 20},
+               headers={"X-CSRF-Token": acsrf})
+    cid = r.json()["id"]
+    r = b.post(f"/api/commands/{cid}/run", headers={"X-CSRF-Token": bcsrf})
+    assert r.status_code == 200
+    assert r.json()["output"] == "in-container-ok"
+    assert seen == {"slot": "u-bob", "argv": argv}
+    r = a.delete(f"/api/commands/{cid}", headers={"X-CSRF-Token": acsrf})
+    assert r.status_code == 200
+
+
 def test_files_flow(clients, env):
     csrf = login(clients["bob"], "bob")
     b = clients["bob"]

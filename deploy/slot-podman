@@ -1,0 +1,24 @@
+#!/bin/bash
+# slot-podman: run podman as a slot's linux user with the slot environment.
+# Runs as ROOT: via a dashboard command with run_as=self (dashboard is root),
+# or via sudo. Never runs podman as root (storage must stay quota-counted).
+# Usage: slot-podman <slot> <podman args...>
+# Strictness (P4): `run`/`create` get --network none (no external net for
+# user containers; pull/images from registries still allowed via `pull`).
+set -u
+slot="${1:?usage: slot-podman <slot> <podman args...>}"
+shift
+[[ "$slot" =~ ^[a-z][a-z0-9-]{0,30}$ ]] || { echo "bad slot: $slot"; exit 1; }
+id "$slot" >/dev/null 2>&1 || { echo "no such user: $slot"; exit 1; }
+uid="$(id -u "$slot")"
+rt="/run/user/$uid"
+install -d -o "$slot" -g "$slot" -m 700 "$rt"
+home="/home/$slot"
+if [[ "${1:-}" == "run" || "${1:-}" == "create" ]]; then
+  sub="$1"
+  shift
+  exec runuser -u "$slot" -- env HOME="$home" XDG_RUNTIME_DIR="$rt" \
+    podman "$sub" --network none "$@"
+fi
+exec runuser -u "$slot" -- env HOME="$home" XDG_RUNTIME_DIR="$rt" \
+  podman "$@"

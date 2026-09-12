@@ -201,6 +201,36 @@ pre {
 label.ck { display: inline-flex; gap: 7px; align-items: center; margin: 4px 14px 4px 0;
   font-size: 13px; color: var(--dim); }
 label.ck input { width: auto; margin: 0; accent-color: var(--acc); }
+/* login cell: role icon before nick instead of "admin" text */
+.who { display: inline-flex; gap: 8px; align-items: center; }
+.who .ic { color: var(--dim); }
+.who.adm .ic { color: var(--acc); }
+/* rights: two columns — first four stacked left, rest right.
+   users table is one real table (opt-out of the scroll hack that splits
+   thead/tbody), so headers always sit exactly above their columns. */
+.users-table { display: table; }
+.users-table thead { display: table-header-group; width: auto; }
+.users-table tbody { display: table-row-group; width: auto; }
+.users-table th { text-align: left; }
+.users-table th:first-child, .users-table td:first-child { width: 1%; white-space: nowrap; vertical-align: top; }
+.users-table th:last-child, .users-table td:last-child { width: 1%; vertical-align: top; }
+.rights-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(4, auto); grid-auto-flow: column;
+  gap: 2px 28px; max-width: 640px; }
+.rights-list .ck-stack { margin: 0; padding: 3px 0; align-items: flex-start;
+  color: var(--txt); line-height: 1.4; }
+.rights-list .ck-stack input { margin-top: 3px; flex: none; }
+.rights-list .ck-stack b { display: block; font-weight: 600; font-size: 13px; }
+.rights-list .ck-stack small { display: block; font-size: 11.5px; }
+/* per-user limits editor: compact CPU/RAM/Disk row under rights, one save */
+.lim-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); max-width: 640px; }
+.lim-row label { display: inline-flex; gap: 6px; align-items: center; margin: 0;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--faint); }
+.lim-row input { width: 66px; margin: 0; padding: 4px 8px; font-size: 12px; }
+@media (max-width: 760px) {
+  .rights-list { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-flow: row; }
+}
 .path { font-family: var(--mono); font-size: 13px; }
 iframe.term { width: 100%; height: 68vh; min-height: 420px;
   border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; background: #000; }

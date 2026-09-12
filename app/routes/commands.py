@@ -95,15 +95,24 @@ async def commands_run(cid: int, request: Request,
     if not (u["is_admin"] or u["id"] in c["allowed"] or "*" in c["allowed"]):
         raise HTTPException(403, "not allowed")
     run_as, use_slice = None, False
+    use_container = False
     if c["run_as"] == "owner" and u["slot"]:
-        run_as, use_slice = u["slot"], True
+        from .. import slots as S
+        if S.container_exists(u["slot"]):
+            use_container = True  # isolated slot: run inside its container
+        else:
+            run_as, use_slice = u["slot"], True
     elif c["run_as"] not in ("", "owner", "self"):
         run_as = c["run_as"]
     lim = u.get("limits") or {}
-    code, out = await asyncio.to_thread(
-        R.run_as, c["argv"], run_as, c["timeout_sec"], use_slice,
-        f"dach-{u['slot']}.slice" if use_slice and u["slot"] else None,
-        lim.get("cpu_quota"), lim.get("mem_max"))
+    if use_container:
+        code, out = await asyncio.to_thread(
+            R.exec_in, u["slot"], c["argv"], c["timeout_sec"])
+    else:
+        code, out = await asyncio.to_thread(
+            R.run_as, c["argv"], run_as, c["timeout_sec"], use_slice,
+            f"dach-{u['slot']}.slice" if use_slice and u["slot"] else None,
+            lim.get("cpu_quota"), lim.get("mem_max"))
     with closing(D.connect(P.DB)) as con:
         con.execute("INSERT INTO runs(cmd_id,user_id,started_at,exit_code,output)"
                     " VALUES(?,?,?,?,?)",

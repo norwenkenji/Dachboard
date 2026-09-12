@@ -36,3 +36,10 @@ defaults:
   cpu_quota: "50%"
   mem_max: "1G"
   disk_quota: "2G"
+
+# --- isolated slots v2 (docker container per slot). OFF = legacy behavior:
+# plain host user + host shell + systemd slice. Turn on only for a test
+# slot first (see docs/SLOTS.md).
+slots_v2: false
+slot_image: "dach-slot:latest"
+slot_network: ""   # e.g. "dach-isolated" once P4 lands; empty = default bridge

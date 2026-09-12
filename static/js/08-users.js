@@ -3,13 +3,14 @@
 async function vUsers() {
   const users = await api("/api/users");
   const info = await api("/api/rights");
-  const ck = (r, usr) => `<label class="ck"><input type="checkbox" data-r="${r}" data-usr="${usr.id}" ${usr.rights[r] ? "checked" : ""}>${r}</label>`;
-  view.innerHTML = `<h3>${ic("users")}${t("users_t")}</h3><table>
-    <thead><tr><th>Login</th><th>Slot</th><th>Rights</th><th>Limits (JSON)</th><th></th></tr></thead><tbody>` +
-    users.map((usr) => `<tr><td><b>${esc(usr.login)}</b>${usr.is_admin ? ' <span class="dim">admin</span>' : ""}${usr.must_change_pw ? ' <span class="dim">· must change pw</span>' : ""}</td>
-      <td><input data-slot="${usr.id}" value="${esc(usr.slot || "")}" size="6"></td>
-      <td>${info.rights.filter((r) => !info.admin_only.includes(r)).map((r) => ck(r, usr)).join("")}</td>
-      <td><input data-lim="${usr.id}" value='${esc(JSON.stringify(usr.limits))}' size="18" class="mono"></td>
+  const rname = (r) => t("right_" + r);
+  const rdesc = (r) => t("right_" + r + "_d");
+  const ck = (r, usr) => `<label class="ck ck-stack"><input type="checkbox" data-r="${r}" data-usr="${usr.id}" ${usr.rights[r] ? "checked" : ""}><span><b>${esc(rname(r))}</b><small class="dim">${esc(rdesc(r))}</small></span></label>`;
+  view.innerHTML = `<h3>${ic("users")}${t("users_t")}</h3><table class="users-table">
+    <thead><tr><th>${t("th_login")}</th><th>${t("th_rights")}</th><th></th></tr></thead><tbody>` +
+    users.map((usr) => `<tr><td><span class="who${usr.is_admin ? " adm" : ""}" title="${usr.is_admin ? "admin" : "user"}">${ic(usr.is_admin ? "shield" : "user")}<b>${esc(usr.login)}</b></span>${usr.must_change_pw ? ' <span class="dim">· must change pw</span>' : ""}</td>
+      <td><span class="rights-list">${info.rights.filter((r) => !info.admin_only.includes(r)).map((r) => ck(r, usr)).join("")}</span>
+      <div class="lim-row"><label>${t("cpu")}<input data-lim-cpu="${usr.id}" value="${esc(((usr.limits) || {}).cpu_quota || "")}" placeholder="50%"></label><label>${t("memory")}<input data-lim-mem="${usr.id}" value="${esc(((usr.limits) || {}).mem_max || "")}" placeholder="1G"></label><label>${t("disk")}<input data-lim-disk="${usr.id}" value="${esc(((usr.limits) || {}).disk_quota || "")}" placeholder="2G"></label></div></td>
       <td style="white-space:nowrap"><button data-save="${usr.id}" title="${t("save_btn")}">${ic("check")}</button>
         <button data-pw="${usr.id}" title="${t("reset_pw")}">${ic("key")}</button>
         <button data-u-del="${usr.id}" class="danger ghost" title="${t("del_user_q")}">${ic("trash")}</button></td></tr>`).join("") +
@@ -24,11 +25,10 @@ async function vUsers() {
     const id = b.dataset.save;
     const rights = {};
     view.querySelectorAll(`[data-usr="${id}"]`).forEach((c) => rights[c.dataset.r] = c.checked);
-    let limits = {};
-    try { limits = JSON.parse(view.querySelector(`[data-lim="${id}"]`).value || "{}"); }
-    catch { alert(t("bad_json")); return; }
+    const lv = (k) => { const el = view.querySelector(`[data-lim-${k}="${id}"]`); return el ? el.value.trim() : ""; };
+    const limits = { cpu_quota: lv("cpu"), mem_max: lv("mem"), disk_quota: lv("disk") };
     const r = await api(`/api/users/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rights, limits, slot: view.querySelector(`[data-slot="${id}"]`).value.trim() || null }) });
+      body: JSON.stringify({ rights, limits }) });
     alert(r.quota_applied ? t("quota_on") : t("saved_q") + (r.quota_msg ? " Quota: " + r.quota_msg : ""));
   });
   view.querySelectorAll("[data-pw]").forEach((b) => b.onclick = async () => {
@@ -52,13 +52,15 @@ async function vUsers() {
     <p class="dim">${t("tokens_hint")} <span class="mono">curl -H "Authorization: Bearer TOKEN" /api/tunnel</span></p>
     <div id="t-list"></div>
     <div class="row"><input id="nt-name" placeholder="${t("token_name_ph")}" style="max-width:170px">
-    <label class="ck"><input type="checkbox" id="nt-tun" checked>tunnel_view</label>
+    <label class="ck"><input type="checkbox" id="nt-tun" checked>${esc(t("right_tunnel_view_d"))}</label>
     <button id="nt-add" class="primary">${ic("plus")}${t("new_token_btn")}</button></div>
     <pre id="nt-once" class="hidden"></pre>`);
   const reloadTokens = async () => {
     const toks = await api("/api/tokens");
-    $("#t-list").innerHTML = toks.map((tk) => `<div class="row"><span class="mono">#${tk.id} <b>${esc(tk.name)}</b></span>
-      <span class="dim">${esc(Object.keys(tk.rights).filter((k) => tk.rights[k]).join(", ") || "—")}
+    const host = $("#t-list");
+    if (!host || !host.isConnected) return; // user switched tabs mid-flight
+    host.innerHTML = toks.map((tk) => `<div class="row"><span class="mono">#${tk.id} <b>${esc(tk.name)}</b></span>
+      <span class="dim">${esc(Object.keys(tk.rights).filter((k) => tk.rights[k]).map(rname).join(", ") || "—")}
       · ${t("last_used")} ${tk.last_used_at ? new Date(tk.last_used_at * 1000).toLocaleString() : t("never")}</span>
       <button data-tdel="${tk.id}" class="danger ghost">${t("revoke_q").replace("?", "")}</button></div>`).join("") || `<p class="dim">${t("no_tokens")}</p>`;
     view.querySelectorAll("[data-tdel]").forEach((b) => b.onclick = async () => {

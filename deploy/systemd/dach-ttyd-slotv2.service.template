@@ -1,0 +1,19 @@
+# Template instance: dach-ttyd-<slot>.service (v2: container shell)
+# For slots WITH a dach-<slot> container. tmux keeps persistence on the
+# host (as the slot user); the shell itself runs inside the container.
+# Generated per slot at provision time (P2+), NOT by install.sh yet.
+[Unit]
+Description=Dachboard ttyd for %i (container)
+After=network.target docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i
+ExecStart=/usr/local/bin/ttyd -i 127.0.0.1 -p PORT --writable INDEX tmux -L dach-%i -f /opt/dachboard/term/tmux.conf new -A -s main docker exec -it dach-%i bash -l
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
