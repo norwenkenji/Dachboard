@@ -9,12 +9,14 @@ from fastapi.testclient import TestClient
 import app.main as main
 from app import auth as A
 from app import db as D
+from app import deps as P
 
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
     db = str(tmp_path / "dach.sqlite3")
     monkeypatch.setattr(main, "DB", db)
+    monkeypatch.setattr(P, "DB", db)
     monkeypatch.setitem(main.CFG, "cookie_secure", False)
     monkeypatch.setitem(main.CFG, "session_ttl_hours", 1)
     monkeypatch.setitem(main.CFG, "tunnel", {
@@ -52,6 +54,7 @@ def env(tmp_path, monkeypatch):
         raise ValueError("no home in test")
 
     monkeypatch.setattr(main, "home_of", fake_home)
+    monkeypatch.setattr(P, "home_of", fake_home)
     return {"db": db, "homes": homes}
 
 
