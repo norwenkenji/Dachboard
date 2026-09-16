@@ -5,6 +5,7 @@ from .. import deps as P
 from .. import files as F
 from fastapi import HTTPException
 import asyncio
+import re
 
 router = APIRouter()
 # ---------- files ----------
@@ -108,20 +109,55 @@ async def files_upload(request: Request, path: str = "", slot: str = "",
     u = await P.require("files", dach_sid)
     P.check_csrf(request, dach_sid)
     form = await request.form()
-    up: UploadFile = form.get("file")
-    if not up:
-        raise HTTPException(400, "no file")
-    data = await up.read()
-    if len(data) > 50 * 1024 * 1024:
-        raise HTTPException(400, "too large")
+    max_mb = int(P.CFG.get("max_upload_mb", 200))
+    ups = form.getlist("file") or []
+    single = not ups
+    if single:
+        up = form.get("file")
+        if not up:
+            raise HTTPException(400, "no file")
+        ups = [up]
+    results = []
     try:
         root = P.home_of(u, slot or None)
-        dest = F.resolve(root, (path + "/" + (up.filename or "upload")).strip("/"))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
-        return {"ok": True, "size": len(data)}
+        for up in ups:
+            fname = up.filename or "upload"
+            fname = re.sub(r"[\\/]+", "_", fname).lstrip(".")
+            if not fname:
+                raise HTTPException(400, "bad filename")
+            dest = F.resolve(root, (path + "/" + fname).strip("/") if path else fname)
+            data = await up.read()
+            if len(data) > max_mb * 1024 * 1024:
+                raise HTTPException(400, f"too large (max {max_mb} MiB)")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(dest.write_bytes, data)
+            results.append({"name": fname, "size": len(data)})
+    except HTTPException:
+        raise
     except (PermissionError, OSError) as e:
         raise HTTPException(400, str(e))
+    return {"ok": True, "files": results if not single else results[0]}
+
+
+@router.post("/api/files/unzip")
+async def files_unzip(request: Request, dach_sid: str | None = Cookie(default=None)):
+    """Deploy a zip: unpack inside the user's root (safe members only)."""
+    u = await P.require("files", dach_sid)
+    P.check_csrf(request, dach_sid)
+    body = await request.json()
+    rel = str(body.get("path", "")).strip("/")
+    into = str(body.get("into", "")).strip("/")
+    root = P.home_of(u, body.get("slot") or None)
+    try:
+        zp = F.resolve(root, rel)
+        if zp.suffix.lower() != ".zip":
+            raise HTTPException(400, "not a zip")
+        written = await asyncio.to_thread(F.extract_zip, root, zp, into)
+    except HTTPException:
+        raise
+    except (PermissionError, ValueError, OSError) as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "files": len(written), "into": into or zp.stem}
 
 
 @router.get("/api/files/download")

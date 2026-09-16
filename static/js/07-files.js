@@ -160,8 +160,10 @@ async function fRender() {
       <button id="f-upl">${ic("up")}${t("fm_upload")}</button>
       <button id="f-paste" ${fClip ? "" : "disabled"}>${ic("check")}${t("fm_paste")}</button>
       ${quota ? `<span class="dim">${(quota.used / 1048576).toFixed(0)} MiB ${t("used")}${quota.limit ? " · " + t("limit") + " " + esc(quota.limit) : ""}</span>` : ""}
-      <input type="file" id="f-upfile" class="hidden">
+      <input type="file" id="f-upfile" class="hidden" multiple>
+      <input type="file" id="f-updir" class="hidden" webkitdirectory>
     </div>
+    <div id="f-drop" class="dropzone">${t("fm_drop_hint")}</div>
     <table id="f-table"><thead><tr><th>${t("th_name")}</th><th></th><th></th></tr></thead><tbody>
     ${list.length ? list.map((e) => `<tr data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}">
       <td><span class="fname">${ic(ficon(e.name, e.dir))} ${esc(e.name)}</span></td>
@@ -179,18 +181,76 @@ async function fRender() {
   $("#f-mkf").onclick = () => inlineCreate(false);
   $("#f-mkd").onclick = () => inlineCreate(true);
   $("#f-upl").onclick = () => $("#f-upfile").click();
-  $("#f-upfile").onchange = async (ev) => {
-    const f = ev.target.files[0];
-    if (!f) return;
-    const fd = new FormData();
-    fd.append("file", f);
-    const r = await fetch(u("/api/files/upload?path=" + encodeURIComponent(fPath)), {
-      method: "POST", headers: CSRF ? { "X-CSRF-Token": CSRF } : {}, body: fd,
-    });
-    if (!r.ok) alert((await r.text()).slice(0, 200));
-    fBust();
-    fRender();
+
+  /* upload queue: multiple files, folders (webkitRelativePath), drag&drop */
+  const upQueue = async (fileList, basePath = "") => {
+    const files = [...fileList];
+    if (!files.length) return;
+    const dz = $("#f-drop");
+    const dzText = () => dz ? dz.textContent : "";
+    let done = 0;
+    const upd = () => { if (dz) dz.textContent = `${t("fm_uploading")} ${done}/${files.length}`; };
+    upd();
+    for (const f of files) {
+      const rel = f.webkitRelativePath || f.name;
+      const relDir = (basePath + "/" + rel).replace(/^\/+/, "").split("/").slice(0, -1).join("/");
+      const fd = new FormData();
+      fd.append("file", f, rel.split("/").pop());
+      const q = relDir ? "?path=" + encodeURIComponent(relDir) : "?path=" + encodeURIComponent(fPath);
+      try {
+        const r = await fetch(u("/api/files/upload" + q), {
+          method: "POST", headers: CSRF ? { "X-CSRF-Token": CSRF } : {}, body: fd });
+        if (!r.ok) alert(`${rel}: ${(await r.text()).slice(0, 200)}`);
+      } catch (e) { alert(`${rel}: ${e.message}`); }
+      done++;
+      upd();
+    }
+    if (dz) { dz.textContent = t("fm_done"); setTimeout(() => fRender(), 400); }
   };
+  $("#f-upfile").onchange = async (ev) => {
+    await upQueue(ev.target.files);
+    ev.target.value = "";
+  };
+  const dirInput = $("#f-updir");
+  if (dirInput) dirInput.onchange = async (ev) => {
+    await upQueue(ev.target.files);
+    ev.target.value = "";
+  };
+  const dz = $("#f-drop");
+  if (dz) {
+    ["dragenter", "dragover"].forEach((n) => dz.addEventListener(n, (e) => {
+      e.preventDefault(); dz.classList.add("over");
+    }));
+    ["dragleave", "drop"].forEach((n) => dz.addEventListener(n, (e) => {
+      e.preventDefault(); dz.classList.remove("over");
+    }));
+    dz.addEventListener("drop", async (e) => {
+      const items = [...(e.dataTransfer?.items || [])];
+      const files = [...(e.dataTransfer?.files || [])];
+      // directories first: walk them via webkitGetAsEntry
+      const entries = items.map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+      if (entries.length && entries.every((en) => en.isDirectory || en.isFile)) {
+        const all = [];
+        const walk = (entry, prefix) => new Promise((res) => {
+          if (entry.isFile) {
+            entry.file((f) => { f.webkitRelativePath = prefix + entry.name; all.push(f); res(); });
+          } else {
+            const reader = entry.createReader();
+            const read = () => reader.readEntries(async (batch) => {
+              if (!batch.length) return res();
+              for (const en of batch) await walk(en, prefix + entry.name + "/");
+              read();
+            });
+            read();
+          }
+        });
+        for (const en of entries) await walk(en, "");
+        await upQueue(all);
+      } else if (files.length) {
+        await upQueue(files);
+      }
+    });
+  }
   $("#f-paste").onclick = doPaste;
   const rows = view.querySelectorAll("#f-table tbody tr[data-name]");
   rows.forEach((tr) => {
@@ -232,6 +292,7 @@ function rowMenu(x, y, name, isDir) {
       a.download = name;
       a.click();
     }, isDir],
+    [t("fm_unzip"), "box", () => doUnzip(name), isDir || !/\.zip$/i.test(name)],
     ["-", null, null],
     [t("fm_copy"), "copy", () => { fClip = { mode: "copy", src: relOf(name) }; fRender(); }],
     [t("fm_cut"), "cut", () => { fClip = { mode: "cut", src: relOf(name) }; fRender(); }],
@@ -246,8 +307,23 @@ function freshMenu(x, y) {
     [t("fm_new_file"), "file", () => inlineCreate(false)],
     [t("fm_new_folder"), "folder", () => inlineCreate(true)],
     [t("fm_upload"), "download", () => document.getElementById("f-upfile")?.click()],
+    [t("fm_upload_dir"), "folder", () => document.getElementById("f-updir")?.click()],
     [t("fm_paste"), "clipboard", doPaste, !fClip],
   ]);
+}
+
+async function doUnzip(name) {
+  if (!/\.zip$/i.test(name)) return;
+  const into = prompt(t("fm_unzip_into"), relOf(name).replace(/\.zip$/i, ""));
+  if (into === null) return;
+  try {
+    const r = await api("/api/files/unzip", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: relOf(name), into: into.trim() }) });
+    alert(t("fm_unzipped").replace("%n", r.files));
+  } catch (e) { alert(e.message); }
+  fBust();
+  fRender();
 }
 
 async function doDelete(name) {

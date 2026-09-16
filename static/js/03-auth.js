@@ -113,6 +113,7 @@ const has = (r) => ME && (ME.is_admin || (ME.rights || {})[r]);
 const TABS = [
   ["overview", null, "grid"], ["services", null, "box"], ["console", null, "term"],
   ["files", "files", "folder"], ["users", "users_manage", "users"],
+  ["api", "users_manage", "code"],
 ];
 const TABVIS = {
   overview: () => has("overview"),
@@ -120,10 +121,11 @@ const TABVIS = {
   console: () => has("commands_run") || has("terminal"),
   files: () => has("files"),
   users: () => has("users_manage"),
+  api: () => has("users_manage"),
 };
 const TABNAME = {
   overview: "nav_overview", services: "nav_services", console: "nav_console",
-  files: "nav_files", users: "nav_users",
+  files: "nav_files", users: "nav_users", api: "nav_api",
 };
 function buildTabs() {
   const nav = $("#tabs"); nav.innerHTML = "";
@@ -145,12 +147,12 @@ function showTab(name) {
   const meta = {
     overview: ["pg_overview_t", "pg_overview_d"], services: ["pg_services_t", "pg_services_d"],
     console: ["pg_console_t", "pg_console_d"], files: ["pg_files_t", "pg_files_d"],
-    users: ["pg_users_t", "pg_users_d"],
+    users: ["pg_users_t", "pg_users_d"], api: ["pg_api_t", "pg_api_d"],
   }[name];
   $("#view").innerHTML = `<div class="pagehead"><h2>${t(meta[0])}</h2><p>${t(meta[1])}</p></div><div id="vbody"></div>`;
   view = $("#vbody");
   ({ overview: vOverview, services: vServices, console: vConsole,
-     files: vFiles, users: vUsers })[name]();
+     files: vFiles, users: vUsers, api: vApi })[name]();
 }
 const fmtGB = (b) => (b / 1073741824).toFixed(1);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>

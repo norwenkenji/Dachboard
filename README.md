@@ -36,6 +36,7 @@ own public URL at `GET /api/tunnel` once a provider is wired in
 
 - [docs/TUNNEL.md](docs/TUNNEL.md) · [docs/TUNNEL.ru.md](docs/TUNNEL.ru.md) — tunnels
 - [docs/PROVIDERS.md](docs/PROVIDERS.md) · [docs/PROVIDERS.ru.md](docs/PROVIDERS.ru.md) — tunnel providers
+- [docs/MCP.md](docs/MCP.md) — let an LLM operate the server through the panel
 - [docs/README.ru.md](docs/README.ru.md) — русская документация
 
 Next: create users in the UI (Users tab): login + temp password + slot

@@ -43,9 +43,17 @@ def env(tmp_path, monkeypatch):
             con.commit()
 
     def fake_home(user, slot=None):
-        if user["is_admin"] and slot:
+        tgt = slot or user.get("slot")
+        if user["is_admin"]:
+            if tgt:
+                for login, home in homes.items():
+                    if tgt in (login, "u-" + login):
+                        return __import__("pathlib").Path(home)
+                raise ValueError("unknown slot in test")
+        elif tgt:
+            # machine tokens carry a slot: map it like a real user's
             for login, home in homes.items():
-                if slot in (login, "u-" + login, user["slot"]):
+                if tgt in (login, "u-" + login):
                     return __import__("pathlib").Path(home)
             raise ValueError("unknown slot in test")
         for login, home in homes.items():

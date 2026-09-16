@@ -8,6 +8,9 @@ session_ttl_hours: 72
 secret_file: /opt/dachboard/.secret
 db_path: /opt/dachboard/data/dachboard.sqlite3
 
+# --- uploads ---
+max_upload_mb: 200           # per file via /api/files/upload
+
 # --- tunnel provider ---
 # Any executable. First http(s):// URL on its stdout wins.
 # Bundled: tunnel/providers/cloudflared-quick.sh [container]

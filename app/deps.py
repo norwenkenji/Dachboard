@@ -6,6 +6,7 @@ import re
 import secrets
 import time
 from contextlib import closing
+from contextvars import ContextVar
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,9 @@ DB = CFG.get("db_path", "/opt/dachboard/data/dachboard.sqlite3")
 SECRET_FILE = CFG.get("secret_file", "/opt/dachboard/.secret")
 COOKIE = "dach_sid"
 LOGIN_FAILS: dict[str, list[float]] = {}
+# Set by the request middleware so require()/check_csrf() see the request even
+# in endpoints that don't declare it. Lets Bearer tokens work on every route.
+CURRENT_REQUEST: ContextVar[Request | None] = ContextVar("current_request", default=None)
 
 
 def secret() -> str:
@@ -127,19 +131,21 @@ def token_subject(request: Request) -> dict | None:
         return None
     digest = hashlib.sha256(authz[7:].strip().encode()).hexdigest()
     with closing(D.connect(DB)) as con:
-        r = con.execute("SELECT id, rights FROM api_tokens WHERE token_hash=?",
+        r = con.execute("SELECT id, rights, slot, is_admin FROM api_tokens WHERE token_hash=?",
                         (digest,)).fetchone()
         if not r:
             return None
         con.execute("UPDATE api_tokens SET last_used_at=? WHERE id=?",
                     (int(time.time()), r["id"]))
         con.commit()
-        return {"id": 0, "login": f"token#{r['id']}", "is_admin": False,
+        return {"id": 0, "login": f"token#{r['id']}", "is_admin": bool(r["is_admin"]),
                 "via": "token", "rights": D.jload(r["rights"], {}),
-                "limits": {}, "slot": None}
+                "limits": {}, "slot": r["slot"]}
 
 
 async def require(right: str, token: str | None, request: Request | None = None) -> dict:
+    if request is None:
+        request = CURRENT_REQUEST.get()
     if request is not None:
         t = token_subject(request)
         if t:
@@ -170,7 +176,13 @@ def check_csrf(request: Request, token: str | None) -> None:
         raise HTTPException(403, "bad csrf")
 
 
+SLOT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+
+
 def home_of(user: dict, slot: str | None = None) -> Path:
+    # a slot name becomes a path component: never trust it unvalidated
+    if slot is not None and not SLOT_RE.fullmatch(slot):
+        raise HTTPException(400, "bad slot")
     if user["is_admin"]:
         return Path(f"/home/{slot}") if slot else Path("/")
     tgt = slot or user["slot"]

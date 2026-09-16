@@ -90,7 +90,10 @@ async def logout(request: Request, response: Response,
 
 
 @router.get("/api/me")
-async def me(dach_sid: str | None = Cookie(default=None)):
+async def me(request: Request, dach_sid: str | None = Cookie(default=None)):
+    t = P.token_subject(request)
+    if t:
+        return t
     u = await P.session_user(dach_sid)
     if not u:
         raise HTTPException(401, "no session")

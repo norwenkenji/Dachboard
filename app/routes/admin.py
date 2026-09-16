@@ -17,8 +17,10 @@ async def tokens_list(dach_sid: str | None = Cookie(default=None)):
     await P.require("users_manage", dach_sid)
     with closing(D.connect(P.DB)) as con:
         rows = con.execute(
-            "SELECT id,name,rights,created_at,last_used_at FROM api_tokens ORDER BY id").fetchall()
-    return [{**dict(r), "rights": D.jload(r["rights"], {})} for r in rows]
+            "SELECT id,name,rights,slot,is_admin,created_at,last_used_at"
+            " FROM api_tokens ORDER BY id").fetchall()
+    return [{**dict(r), "rights": D.jload(r["rights"], {}),
+             "is_admin": bool(r["is_admin"])} for r in rows]
 
 
 @router.post("/api/tokens")
@@ -27,15 +29,21 @@ async def tokens_create(request: Request, dach_sid: str | None = Cookie(default=
     P.check_csrf(request, dach_sid)
     body = await request.json()
     name = str(body.get("name", "")).strip()[:64] or "bot"
+    from ..rbac import TOKEN_HOLDABLE
+    holdable = {r for r in RIGHTS if r not in ADMIN_ONLY} | TOKEN_HOLDABLE
     rights = {r: bool(body.get("rights", {}).get(r, False)) for r in RIGHTS
-              if r not in ADMIN_ONLY}
+              if r in holdable}
+    slot = str(body.get("slot") or "").strip() or None
+    if slot and not P.SLOT_RE.fullmatch(slot):
+        raise HTTPException(400, "bad slot")
+    is_adm = 1 if body.get("is_admin") else 0
     tok, digest = A.api_token()
     with closing(D.connect(P.DB)) as con:
         try:
             cur = con.execute(
-                "INSERT INTO api_tokens(name,token_hash,rights,created_at)"
-                " VALUES(?,?,?,?)",
-                (name, digest, json.dumps(rights), int(time.time())))
+                "INSERT INTO api_tokens(name,token_hash,rights,slot,is_admin,created_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (name, digest, json.dumps(rights), slot, is_adm, int(time.time())))
             con.commit()
             return {"id": cur.lastrowid, "token": tok}
         except Exception as e:

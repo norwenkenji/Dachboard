@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     name TEXT UNIQUE NOT NULL,
     token_hash TEXT UNIQUE NOT NULL,
     rights TEXT NOT NULL DEFAULT '{}',
+    slot TEXT,
+    is_admin INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     last_used_at INTEGER NOT NULL DEFAULT 0
 );
@@ -77,6 +79,13 @@ def init(path: str | Path) -> None:
         cols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
         if "must_change_pw" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0")
+        tcols = {r[1] for r in con.execute("PRAGMA table_info(api_tokens)")}
+        if "slot" not in tcols:
+            # machine tokens need a home dir to scope file ops to
+            con.execute("ALTER TABLE api_tokens ADD COLUMN slot TEXT")
+        if "is_admin" not in tcols:
+            # admin machine token: full FS + all rights except users_manage
+            con.execute("ALTER TABLE api_tokens ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
         con.commit()
 
 

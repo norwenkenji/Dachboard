@@ -52,14 +52,17 @@ async function vUsers() {
     <p class="dim">${t("tokens_hint")} <span class="mono">curl -H "Authorization: Bearer TOKEN" /api/tunnel</span></p>
     <div id="t-list"></div>
     <div class="row"><input id="nt-name" placeholder="${t("token_name_ph")}" style="max-width:170px">
-    <label class="ck"><input type="checkbox" id="nt-tun" checked>${esc(t("right_tunnel_view_d"))}</label>
+    <input id="nt-slot" placeholder="${t("token_slot_ph")}" style="max-width:140px">
+    <label class="ck"><input type="checkbox" id="nt-tun" checked>${esc(t("right_tunnel_view"))}</label>
+    <label class="ck"><input type="checkbox" id="nt-admin">${esc(t("token_admin"))}</label>
     <button id="nt-add" class="primary">${ic("plus")}${t("new_token_btn")}</button></div>
+    <p class="dim">${t("token_admin_d")}</p>
     <pre id="nt-once" class="hidden"></pre>`);
   const reloadTokens = async () => {
     const toks = await api("/api/tokens");
     const host = $("#t-list");
     if (!host || !host.isConnected) return; // user switched tabs mid-flight
-    host.innerHTML = toks.map((tk) => `<div class="row"><span class="mono">#${tk.id} <b>${esc(tk.name)}</b></span>
+    host.innerHTML = toks.map((tk) => `<div class="row"><span class="mono">#${tk.id} <b>${esc(tk.name)}</b>${tk.is_admin ? ` ${ic("star")}` : ""}${tk.slot ? ` <span class="dim">${esc(tk.slot)}</span>` : ""}</span>
       <span class="dim">${esc(Object.keys(tk.rights).filter((k) => tk.rights[k]).map(rname).join(", ") || "—")}
       · ${t("last_used")} ${tk.last_used_at ? new Date(tk.last_used_at * 1000).toLocaleString() : t("never")}</span>
       <button data-tdel="${tk.id}" class="danger ghost">${t("revoke_q").replace("?", "")}</button></div>`).join("") || `<p class="dim">${t("no_tokens")}</p>`;
@@ -72,6 +75,8 @@ async function vUsers() {
   $("#nt-add").onclick = async () => {
     const r = await api("/api/tokens", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: $("#nt-name").value.trim() || "bot",
+        slot: $("#nt-slot").value.trim() || null,
+        is_admin: $("#nt-admin").checked,
         rights: { tunnel_view: $("#nt-tun").checked } }) });
     const p = $("#nt-once"); p.classList.remove("hidden");
     p.textContent = t("shown_once") + "\n" + r.token;

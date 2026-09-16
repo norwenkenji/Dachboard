@@ -89,7 +89,23 @@ async def _sampler():
 
 
 app = FastAPI(title="dachboard", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def current_request(request, call_next):
+    """Expose the request to P.require() in endpoints that don't declare it,
+    so Bearer API tokens work on every route (not just the two that pass it)."""
+    tok = P.CURRENT_REQUEST.set(request)
+    try:
+        return await call_next(request)
+    finally:
+        P.CURRENT_REQUEST.reset(tok)
+
+
 app.mount("/static", StaticFiles(directory=str(P.ROOT / "static")), name="static")
+if (P.ROOT / "mcp").is_dir():
+    # MCP stdio server script — public download for the API tab
+    app.mount("/mcp", StaticFiles(directory=str(P.ROOT / "mcp")), name="mcp")
 app.include_router(auth.router)
 app.include_router(overview.router)
 app.include_router(files.router)

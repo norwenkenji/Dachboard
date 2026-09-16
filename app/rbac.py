@@ -14,6 +14,10 @@ RIGHTS = [
 ]
 
 ADMIN_ONLY = {"users_manage", "commands_edit"}
+# Machine tokens may hold these even though they are admin-only for humans:
+# a token is minted by an admin and carries that admin's intent, but it must
+# never mint users or other tokens (users_manage stays human-admin only).
+TOKEN_HOLDABLE = {"commands_edit"}
 
 
 def default_rights(is_admin: bool = False) -> dict:
@@ -24,8 +28,13 @@ def default_rights(is_admin: bool = False) -> dict:
 
 def can(user: dict, right: str) -> bool:
     if user.get("is_admin"):
+        # admin machine tokens: everything except user/token management,
+        # which stays human-only so a leaked token cannot mint admins
+        if right == "users_manage":
+            return user.get("via") != "token"
         return True
     rights = user.get("rights") or {}
     if right in ADMIN_ONLY:
-        return False
+        return (user.get("via") == "token" and right in TOKEN_HOLDABLE
+                and bool(rights.get(right, False)))
     return bool(rights.get(right, False))
