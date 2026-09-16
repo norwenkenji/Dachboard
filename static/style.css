@@ -250,10 +250,70 @@ iframe.term { width: 100%; height: 68vh; min-height: 420px;
 .termbar button { margin: 0; padding: 4px 10px; font-size: 12px; }
 .url-big { font-family: var(--mono); font-size: 15px; word-break: break-all; }
 
-@media (max-width: 640px) {
-  header.top { flex-wrap: wrap; min-height: 0; padding-bottom: 8px; }
-  header.top #me { margin-left: 0; }
-  .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
-  .vrow { grid-template-columns: 86px 1fr; }
+/* ---------- mobile ---------- */
+@media (max-width: 760px) {
+  body { font-size: 15px; }
+  /* header: logo icon + scrollable tabs + lang + logout, no wrap mess */
+  header.top { flex-wrap: nowrap; gap: 6px; padding: 0 8px; min-height: 50px; }
+  header.top .brand b { display: none; }
+  header.top .brand svg { width: 24px; height: 24px; }
+  nav.tabs { flex: 1; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch; }
+  nav.tabs::-webkit-scrollbar { display: none; }
+  nav.tabs button { padding: 10px 11px; font-size: 13px; }
+  header.top #me { display: none; }
+  #lang { padding: 8px 10px; }
+  #logout { padding: 8px 10px; }
+
+  main { padding: 12px 10px 90px; }
+  .pagehead { padding-bottom: 8px; margin-bottom: 12px; }
+  .pagehead h2 { font-size: 17px; }
+  .pagehead p { font-size: 12.5px; }
+  main h3 { margin: 20px 0 8px; }
+
+  /* no iOS auto-zoom on focus, comfortable touch targets */
+  input, select, textarea { font-size: 16px; padding: 10px 12px; }
+  button, .btn { font-size: 14px; padding: 10px 14px; min-height: 40px; }
+  .row input, .row select { flex: 1 1 140px; width: auto; }
+  .row button { flex: none; }
+
+  /* vitals stack neatly */
+  .vrow { grid-template-columns: 84px 1fr; gap: 8px; padding: 10px 0; }
   .vrow .vv { grid-column: 2; text-align: left; }
+  .tgrid { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+
+  /* tables scroll horizontally instead of breaking layout */
+  table { font-size: 12.5px; -webkit-overflow-scrolling: touch; }
+  td, th { padding: 8px 10px; }
+
+  /* files: drop mtime column, dropzone is pointless on touch */
+  #f-table td:nth-child(3), #f-table th:nth-child(3) { display: none; }
+  .dropzone { display: none; }
+  .crumbs { padding: 4px 6px; }
+  .crumbs button { padding: 7px 9px; }
+
+  /* terminal uses dynamic viewport height (mobile keyboard safe) */
+  iframe.term { height: 62dvh; min-height: 300px; }
+  .termbar { flex-wrap: wrap; }
+
+  /* modal + ctx menu fit small screens */
+  .modal { max-width: 94vw; padding: 14px; }
+  .modal textarea { min-width: 0; width: 100%; min-height: 44vh; }
+  .ctxmenu { min-width: 180px; max-width: 86vw; }
+  .ctxmenu button { padding: 11px 12px; font-size: 14px; }
+
+  /* users: rights already stack at 760px; limits inputs can grow */
+  .lim-row input { flex: 1 1 70px; }
+
+  /* long urls and pre blocks never overflow the card */
+  .url-big { font-size: 13px; }
+  pre { font-size: 12px; }
+}
+
+/* coarse pointers (phones/tablets) get fatter targets even in landscape */
+@media (pointer: coarse) {
+  nav.tabs button { min-height: 44px; }
+  .ctxmenu button { min-height: 40px; }
+  #f-table tr { min-height: 40px; }
 }
