@@ -24,15 +24,16 @@ tunnel:
 # --- terminal (ttyd) ---
 ttyd:
   bin: /usr/local/bin/ttyd
-  port_base: 7681          # slot i -> port_base + i
+  port_base: 7681          # root shell = base-1, slots take base..base+118
   shell: bash
 
-# --- managed user slots (created by install.sh as u-c1..u-c4, nologin) ---
-slots:
-  - u-c1
-  - u-c2
-  - u-c3
-  - u-c4
+# --- managed user slots ---
+# Slots are created ON DEMAND: name one in the Users tab (or through the
+# Telegram bot) and the panel builds it — linux user, home, quota, ttyd unit,
+# nginx auth gate — and records its port in the `slots` table.
+# The list below is LEGACY only: names here also work and keep their
+# index-based port (port_base + index). Leave empty on a new install.
+slots: []
 
 # default limits for new users (admin can change per user in UI)
 defaults:

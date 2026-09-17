@@ -18,6 +18,10 @@ async function vOverview() {
           <span class="vv mono">${esc(h.hostname || "—")}</span></div>
         <div class="vrow"><span class="vk">${t("hw_cpu")}</span>
           <span class="vv">${esc(h.cpu_model || "—")}${h.cpu_cores ? ` · ${h.cpu_cores} ${t("cores")}` : ""}</span></div>
+        <div class="vrow"><span class="vk">${t("hw_ram")}</span>
+          <span class="vv mono">${fmtGB(m.mem.total)} G</span></div>
+        <div class="vrow"><span class="vk">${t("hw_disk")}</span>
+          <span class="vv mono">${fmtGB(m.disk.total)} G</span></div>
         <div class="vrow"><span class="vk">${t("hw_sys")}</span>
           <span class="vv">${esc([h.os, h.kernel, h.arch].filter(Boolean).join(" · ") || "—")}</span></div>
       </div>

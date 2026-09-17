@@ -1,0 +1,8 @@
+[Unit]
+Description=dach one-shot: create/revoke dashboard user from telegram bot
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dachboard/.venv/bin/python /home/zxc/dach-adduser/dach-adduser.py
+TimeoutStartSec=300

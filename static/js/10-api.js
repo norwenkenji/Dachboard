@@ -28,6 +28,15 @@ const API_ENDPOINTS = [
   ["POST", "/api/tunnel/refresh", "tunnel_view", "drop tunnel URL cache"],
   ["GET", "/api/me", "—", "current user or token info"],
   ["GET", "/api/users", "users_manage", "users list (admin)"],
+  ["POST", "/api/users", "users_manage", "create user {login, password, slot?, is_admin?} — a new slot name is provisioned"],
+  ["PUT", "/api/users/{id}", "users_manage", "update rights/limits/slot"],
+  ["DELETE", "/api/users/{id}", "users_manage", "delete user + sessions"],
+  ["GET", "/api/rights", "users_manage", "rights matrix"],
+  ["GET", "/api/slots", "users_manage", "registered slots + their ports"],
+  ["POST", "/api/slots", "users_manage", "provision a slot {slot} — linux user, home, quota, ttyd, nginx gate"],
+  ["DELETE", "/api/slots/{slot}", "users_manage", "remove slot, {wipe?} deletes user + home"],
+  ["POST", "/api/terminal/ensure", "terminal", "start the slot's ttyd, returns {slot, port}"],
+  ["POST", "/api/terminal/restart", "terminal", "fresh shell in the slot"],
   ["POST", "/api/tokens", "users_manage", "mint API token {name, slot?, is_admin?}"],
 ];
 

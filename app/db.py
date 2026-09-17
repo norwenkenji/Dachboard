@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     created_at INTEGER NOT NULL,
     last_used_at INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS slots (
+    slot TEXT PRIMARY KEY,
+    port INTEGER UNIQUE NOT NULL,
+    created_at INTEGER NOT NULL
+);
 """
 
 

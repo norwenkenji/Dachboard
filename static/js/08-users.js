@@ -17,7 +17,7 @@ async function vUsers() {
     `</tbody></table>
     <h3>${t("new_user_t")}</h3><div class="row"><input id="nu-login" placeholder="Login" style="max-width:150px">
     <input id="nu-pass" type="password" placeholder="Temp password, 8+" style="max-width:170px">
-    <input id="nu-slot" placeholder="Slot, e.g. u-c1" style="max-width:140px">
+    <input id="nu-slot" placeholder="${t("slot_ph")}" style="max-width:140px" title="${esc(t("slot_hint"))}">
     <label class="ck"><input type="checkbox" id="nu-admin">admin</label>
     <button id="nu-add" class="primary">${ic("plus")}${t("add")}</button></div>
     <p class="dim">${t("temp_note")}</p>`;

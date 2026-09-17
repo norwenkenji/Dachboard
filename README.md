@@ -39,10 +39,13 @@ own public URL at `GET /api/tunnel` once a provider is wired in
 - [docs/MCP.md](docs/MCP.md) — let an LLM operate the server through the panel
 - [docs/README.ru.md](docs/README.ru.md) — русская документация
 
-Next: create users in the UI (Users tab): login + temp password + slot
-(`u-c1`…) + rights checkboxes + limits. The user sets their own password on
-first login. Hand them the tunnel URL + credentials any way you like
-(Telegram bot, QR, …) — that integration lives outside this repo.
+Next: create users in the UI (Users tab): login + temp password + slot name +
+rights checkboxes + limits. Slot names are free — type any new name
+(`motya`, `itsmax`, …) and the panel builds the slot for you: linux user, home,
+quota, ttyd unit, nginx auth gate, and a stable port recorded in the `slots`
+table. The user sets their own password on first login. Hand them the tunnel
+URL + credentials any way you like (Telegram bot, QR, …) — that integration
+lives outside this repo.
 
 ## Upgrade
 

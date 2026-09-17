@@ -90,6 +90,23 @@ async def users_create(request: Request, dach_sid: str | None = Cookie(default=N
     rights = {r: bool(body.get("rights", {}).get(r, False)) for r in RIGHTS}
     if body.get("is_admin"):
         rights = {r: True for r in RIGHTS}
+    slot = str(body.get("slot") or "").strip().lower() or None
+    slot_log = []
+    if slot:
+        from .. import provision as PR
+        known = set(PR.registered_slots(P.DB))
+        with closing(D.connect(P.DB)) as con:
+            known |= {r["slot"] for r in con.execute(
+                "SELECT slot FROM users WHERE slot IS NOT NULL")}
+        err = PR.name_error(slot, known)
+        if err:
+            raise HTTPException(400, f"slot: {err}")
+        # daemon runs as root, so a brand-new slot is built on demand
+        res = await asyncio.to_thread(PR.create_slot, P.DB, slot,
+                                      (P.CFG.get("defaults") or {}).get("disk_quota"))
+        if not res.get("ok"):
+            raise HTTPException(400, res.get("msg", "slot provisioning failed"))
+        slot_log = res.get("log", [])
     with closing(D.connect(P.DB)) as con:
         try:
             cur = con.execute(
@@ -97,9 +114,9 @@ async def users_create(request: Request, dach_sid: str | None = Cookie(default=N
                 " VALUES(?,?,?,?,?,?,?)",
                 (login, A.hash_password(password), 1 if body.get("is_admin") else 0,
                  json.dumps(rights), json.dumps(body.get("limits", {})),
-                 body.get("slot"), int(time.time())))
+                 slot, int(time.time())))
             con.commit()
-            return {"id": cur.lastrowid}
+            return {"id": cur.lastrowid, "slot_log": slot_log}
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -128,8 +145,22 @@ async def users_update(uid: int, request: Request,
         sets.append("limits=?")
         vals.append(json.dumps(body["limits"]))
     if "slot" in body:
+        newslot = str(body.get("slot") or "").strip().lower() or None
+        if newslot:
+            from .. import provision as PR
+            known = set(PR.registered_slots(P.DB))
+            with closing(D.connect(P.DB)) as con:
+                known |= {r["slot"] for r in con.execute(
+                    "SELECT slot FROM users WHERE slot IS NOT NULL")}
+            err = PR.name_error(newslot, known)
+            if err:
+                raise HTTPException(400, f"slot: {err}")
+            res = await asyncio.to_thread(PR.create_slot, P.DB, newslot,
+                                          (P.CFG.get("defaults") or {}).get("disk_quota"))
+            if not res.get("ok"):
+                raise HTTPException(400, res.get("msg", "slot provisioning failed"))
         sets.append("slot=?")
-        vals.append(body["slot"])
+        vals.append(newslot)
     if "password" in body and body["password"]:
         if len(body["password"]) < 8:
             raise HTTPException(400, "password min 8")
@@ -180,3 +211,52 @@ async def rights_list(dach_sid: str | None = Cookie(default=None)):
     await P.require("users_manage", dach_sid)
     from ..rbac import ADMIN_ONLY
     return {"rights": RIGHTS, "admin_only": sorted(ADMIN_ONLY)}
+
+
+@router.get("/api/slots")
+async def slots_list(dach_sid: str | None = Cookie(default=None)):
+    await P.require("users_manage", dach_sid)
+    rows = []
+    with closing(D.connect(P.DB)) as con:
+        for r in con.execute("SELECT slot, port, created_at FROM slots ORDER BY slot"):
+            rows.append(dict(r))
+    return {"slots": rows, "legacy": list(P.CFG.get("slots") or [])}
+
+
+@router.post("/api/slots")
+async def slots_create(request: Request, dach_sid: str | None = Cookie(default=None)):
+    """Provision a brand-new slot by name (linux user + home + quota + ttyd +
+    nginx gate). The daemon runs as root, so this builds it for real."""
+    await P.require("users_manage", dach_sid)
+    P.check_csrf(request, dach_sid)
+    body = await request.json()
+    slot = str(body.get("slot", "")).strip().lower()
+    from .. import provision as PR
+    err = PR.name_error(slot, set(PR.registered_slots(P.DB)))
+    if err:
+        raise HTTPException(400, f"slot: {err}")
+    res = await asyncio.to_thread(
+        PR.create_slot, P.DB, slot,
+        (P.CFG.get("defaults") or {}).get("disk_quota"))
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("msg", "slot provisioning failed"))
+    return {"ok": True, "slot": slot, "port": res.get("port"),
+            "log": res.get("log", [])}
+
+
+@router.delete("/api/slots/{slot}")
+async def slots_delete(slot: str, request: Request,
+                       dach_sid: str | None = Cookie(default=None)):
+    await P.require("users_manage", dach_sid)
+    P.check_csrf(request, dach_sid)
+    body = await request.json() if request.headers.get(
+        "content-type", "").startswith("application/json") else {}
+    with closing(D.connect(P.DB)) as con:
+        if con.execute("SELECT 1 FROM users WHERE slot=?", (slot,)).fetchone():
+            raise HTTPException(400, "slot still assigned to a user")
+    from .. import provision as PR
+    res = await asyncio.to_thread(PR.remove_slot, P.DB, slot,
+                                  bool(body.get("wipe")))
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("msg", "slot removal failed"))
+    return {"ok": True, "log": res.get("log", [])}

@@ -176,7 +176,7 @@ def check_csrf(request: Request, token: str | None) -> None:
         raise HTTPException(403, "bad csrf")
 
 
-SLOT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+SLOT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 
 def home_of(user: dict, slot: str | None = None) -> Path:
@@ -192,11 +192,22 @@ def home_of(user: dict, slot: str | None = None) -> Path:
 
 
 def slot_port(slot: str) -> int | None:
+    """Terminal port for a slot. Dynamic slots live in the `slots` registry;
+    pre-declared config slots keep their legacy index-based port."""
+    base = int(CFG.get("ttyd", {}).get("port_base", 7681))
     if slot == "root":
-        return int(CFG.get("ttyd", {}).get("port_base", 7681)) - 1
+        return base - 1
+    try:
+        with closing(D.connect(DB)) as con:
+            r = con.execute("SELECT port FROM slots WHERE slot=?",
+                            (slot,)).fetchone()
+        if r:
+            return int(r["port"])
+    except Exception:
+        pass
     slots: list = CFG.get("slots", [])
     if slot in slots:
-        return int(CFG.get("ttyd", {}).get("port_base", 7681)) + slots.index(slot)
+        return base + slots.index(slot)
     return None
 
 

@@ -68,23 +68,23 @@ else
   echo "term client vendoring failed, ttyd default page"
 fi
 
-# --- user slots ---
-i=0
-for slot in u-c1 u-c2 u-c3 u-c4; do
-  if ! id "$slot" >/dev/null 2>&1; then
-    useradd -m -s /usr/sbin/nologin "$slot"
-    echo "created linux user $slot"
-  fi
-  port=$((PORT_BASE + i)); i=$((i + 1))
-  # per-slot ttyd unit
-  sed -e "s/%i/$slot/g" -e "s/PORT/$port/" -e "s|INDEX|$TERM_INDEX|" \
-    "$REPO_DIR/deploy/systemd/dach-ttyd-slot.service.template" \
-    > "/etc/systemd/system/dach-ttyd-${slot}.service"
-  systemctl enable "dach-ttyd-${slot}.service" >/dev/null
-  # nginx per-slot term + auth blocks (static X-Slot: nginx mangles
-  # query strings in auth_request on some versions, so no ?args there)
-  mkdir -p /etc/nginx/dachboard
-  cat > "/etc/nginx/dachboard/term-${slot}.conf" <<EOF
+# --- user slots: dynamic, created on demand by the panel ---
+# Nothing is pre-created here. Naming a slot in the Users tab (or via the
+# Telegram bot) builds it: linux user + home + quota + ttyd + nginx gate,
+# with its port recorded in the `slots` table. On a reinstall we just refresh
+# the ttyd unit and nginx gate for slots that already exist.
+mkdir -p /etc/nginx/dachboard
+DB_FILE="$DACH/data/dachboard.sqlite3"
+if [ -f "$DB_FILE" ]; then
+  while read -r slot port; do
+    [ -n "$slot" ] || continue
+    sed -e "s/%i/$slot/g" -e "s/PORT/$port/" -e "s|INDEX|$TERM_INDEX|" \
+      "$REPO_DIR/deploy/systemd/dach-ttyd-slot.service.template" \
+      > "/etc/systemd/system/dach-ttyd-${slot}.service"
+    systemctl enable "dach-ttyd-${slot}.service" >/dev/null
+    # nginx per-slot term + auth blocks (static X-Slot: nginx mangles
+    # query strings in auth_request on some versions, so no ?args there)
+    cat > "/etc/nginx/dachboard/term-${slot}.conf" <<EOF
 location = /dash-auth-${slot} {
     internal;
     proxy_pass http://127.0.0.1:8420/api/auth-check;
@@ -108,7 +108,20 @@ location /term/${slot}/ {
     proxy_send_timeout 86400s;
 }
 EOF
-done
+    echo "refreshed slot $slot on :$port"
+  done < <(python3 - "$DB_FILE" <<'EOF'
+import sqlite3, sys
+try:
+    con = sqlite3.connect(sys.argv[1])
+    for slot, port in con.execute("SELECT slot, port FROM slots ORDER BY slot"):
+        print(slot, port)
+except Exception:
+    pass
+EOF
+)
+else
+  echo "no DB yet — slots get created on demand from the Users tab"
+fi
 
 # --- filesystem quotas: hard per-user caps, automatic on ext4 ---
 FSTYPE=$(findmnt -n -o FSTYPE / 2>/dev/null || echo unknown)
