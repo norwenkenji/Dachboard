@@ -11,8 +11,17 @@ async function vOverview() {
     const pct = (a, b) => (b ? Math.min(100, (a / b) * 100) : 0).toFixed(0);
     const temps = Object.entries(m.temps || {})
       .map(([k, v]) => `<div class="trow"><span>${esc(k)}</span><b>${v}°</b></div>`).join("");
+    const h = m.host || {};
     view.innerHTML = `
       <div class="panel">
+        <div class="vrow"><span class="vk">${t("host")}</span>
+          <span class="vv mono">${esc(h.hostname || "—")}</span></div>
+        <div class="vrow"><span class="vk">${t("hw_cpu")}</span>
+          <span class="vv">${esc(h.cpu_model || "—")}${h.cpu_cores ? ` · ${h.cpu_cores} ${t("cores")}` : ""}</span></div>
+        <div class="vrow"><span class="vk">${t("hw_sys")}</span>
+          <span class="vv">${esc([h.os, h.kernel, h.arch].filter(Boolean).join(" · ") || "—")}</span></div>
+      </div>
+      <div class="panel" style="margin-top:10px">
         <div class="vrow"><span class="vk">${t("cpu")}</span>
           <div class="meter"><i style="width:${m.cpu}%"></i></div>
           <span class="vv mono">${m.cpu}% · ${t("load")} ${m.load.map((x) => x.toFixed(2)).join(" ")}</span></div>

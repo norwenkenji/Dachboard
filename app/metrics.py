@@ -89,6 +89,44 @@ def uptime() -> float:
         return 0.0
 
 
+_host_cache: dict | None = None
+
+
+def host_info() -> dict:
+    """Static hardware/OS facts: hostname, OS, kernel, arch, CPU model, cores.
+    Cached — none of this changes at runtime."""
+    global _host_cache
+    if _host_cache is not None:
+        return _host_cache
+    info = {"hostname": "", "os": "", "kernel": "", "arch": "",
+            "cpu_model": "", "cpu_cores": os.cpu_count() or 0}
+    try:
+        u = os.uname()
+        info.update(hostname=u.nodename, kernel=u.release, arch=u.machine)
+    except Exception:
+        pass
+    try:
+        for line in (_read("/etc/os-release") or "").splitlines():
+            if line.startswith("PRETTY_NAME="):
+                info["os"] = line.split("=", 1)[1].strip().strip('"')
+                break
+    except Exception:
+        pass
+    try:
+        cores = 0
+        for line in (_read("/proc/cpuinfo") or "").splitlines():
+            if line.startswith("model name") and not info["cpu_model"]:
+                info["cpu_model"] = line.split(":", 1)[1].strip()
+            elif line.startswith("processor"):
+                cores += 1
+        if cores:
+            info["cpu_cores"] = cores
+    except Exception:
+        pass
+    _host_cache = info
+    return info
+
+
 def _docker(args: list, timeout: int = 10) -> subprocess.CompletedProcess:
     if not shutil.which("docker"):
         raise FileNotFoundError("docker")
@@ -138,4 +176,5 @@ def snapshot() -> dict:
         "temps": temps(),
         "load": load(),
         "uptime": uptime(),
+        "host": host_info(),
     }
