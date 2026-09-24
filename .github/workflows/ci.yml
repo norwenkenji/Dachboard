@@ -4,13 +4,26 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned labels, not `ubuntu-latest`. GitHub migrates `-latest` from 24.04 to
+    # 26.04 starting 2026-10-19, and a silent base-image swap under a security
+    # project is exactly the kind of change that should arrive in a reviewed
+    # commit instead of mid-week. 26.04 runs in the matrix now, so the migration
+    # is proven before it is forced; collapse this to a single label once
+    # `-latest` has moved and 24.04 stops being the default.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # v5+ of these actions run on Node 24. v4 targeted the deprecated Node 20,
+      # which the runner only kept working by force-running it on 24 and
+      # annotating every build about it.
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       # requirements-dev.txt pulls in requirements.txt plus pytest/httpx/ruff/
@@ -24,10 +37,12 @@ jobs:
       - run: for f in static/js/*.js; do node --check "$f"; done
 
   lint:
-    runs-on: ubuntu-latest
+    # One label is enough here: ruff and mypy are not OS-sensitive (mypy is
+    # pinned to platform=linux in pyproject.toml regardless of the runner).
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
