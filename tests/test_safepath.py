@@ -180,11 +180,80 @@ def test_created_files_inherit_root_owner(backend, tmp_path):
 
 @pytest.mark.skipif(WINDOWS, reason="needs symlink privilege")
 def test_inhome_symlink_is_followed_for_read(backend, tmp_path):
+    """A *relative* in-home link is the supported convenience case.
+
+    The link must be relative: see the next test for why an absolute one is
+    refused even when it stays inside the home.
+    """
     if not _link_supported(tmp_path):
         pytest.skip("symlink() unavailable")
     SP.write_text(tmp_path, "real/secret.txt", "inside")
-    os.symlink(tmp_path / "real" / "secret.txt", tmp_path / "link.txt")
+    os.symlink("real/secret.txt", tmp_path / "link.txt")
     assert SP.read_text(tmp_path, "link.txt") == "inside"
+
+
+@pytest.mark.skipif(WINDOWS, reason="needs symlink privilege")
+def test_absolute_inhome_symlink_is_refused(backend, tmp_path):
+    """An absolute link is refused even when it points inside the home.
+
+    That is the ``RESOLVE_BENEATH`` contract the anchored walk implements: the
+    kernel rejects an absolute symlink outright, without checking where it
+    lands. Following one here would make the same request behave differently
+    depending on whether the host supports the anchored backend — and deciding
+    "is this absolute path still inside the home?" by resolving it re-opens the
+    very TOCTOU window this module exists to close. A slot user who wants the
+    convenience writes a relative link instead.
+    """
+    if not _link_supported(tmp_path):
+        pytest.skip("symlink() unavailable")
+    SP.write_text(tmp_path, "real/secret.txt", "inside")
+    os.symlink(str(tmp_path / "real" / "secret.txt"), tmp_path / "abs.txt")
+    with pytest.raises(PermissionError):
+        SP.read_text(tmp_path, "abs.txt")
+
+
+@pytest.mark.skipif(WINDOWS, reason="needs symlink privilege")
+def test_relative_inhome_dir_symlink_is_traversable(backend, tmp_path):
+    """A relative link to a directory inside the home must be walkable.
+
+    Regression: ``O_NOFOLLOW`` combined with ``O_DIRECTORY`` makes Linux answer
+    ``ENOTDIR`` rather than ``ELOOP`` for a symlink, and the walk only
+    recognised ``ELOOP`` — so every mid-path directory symlink failed outright
+    instead of being expanded. This covers both directions through the link,
+    read and write, since the write path additionally runs ``_mkdirs`` over the
+    same components.
+    """
+    if not _link_supported(tmp_path):
+        pytest.skip("symlink() unavailable")
+    SP.write_text(tmp_path, "real/notes/a.txt", "hello")
+    os.symlink("real/notes", tmp_path / "notes")
+
+    assert SP.read_text(tmp_path, "notes/a.txt") == "hello"
+
+    SP.write_text(tmp_path, "notes/b.txt", "written")
+    assert (tmp_path / "real" / "notes" / "b.txt").read_text() == "written"
+
+    # ...and a deeper level, which is what makes _mkdirs walk the link too
+    SP.write_text(tmp_path, "notes/deep/c.txt", "deep")
+    assert (tmp_path / "real" / "notes" / "deep" / "c.txt").read_text() == "deep"
+
+
+def test_file_used_as_a_directory_reports_not_a_directory(backend, tmp_path):
+    """ENOTDIR must still mean what it says when the component is not a link.
+
+    The directory-symlink fix widens which errnos the anchored walk treats as
+    "this hop is a symlink". This pins the other half: ``readlink`` answering
+    EINVAL has to surface the original ENOTDIR, not a bogus escape or link error.
+
+    Kernel backend only — ``_walk`` is where the errno handling lives. The
+    portable backend resolves the joined path instead and reports ENOENT for the
+    same input, so there is nothing of this fix for it to exercise.
+    """
+    if backend == "fallback":
+        pytest.skip("errno handling under test is in the anchored walk only")
+    SP.write_text(tmp_path, "notes.txt", "just a file")
+    with pytest.raises(NotADirectoryError):
+        SP.read_text(tmp_path, "notes.txt/sub.txt")
 
 
 @pytest.mark.skipif(WINDOWS, reason="needs symlink privilege")

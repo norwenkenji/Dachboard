@@ -108,13 +108,16 @@ def _is_absolute(s: str) -> bool:
 def resolve(root: str | Path, rel: str | Path | None = "") -> Path:
     """Resolved path for ``rel`` under ``root``, containment-checked.
 
-    Follows symlinks, refusing any that land outside ``root``. This is the
-    validation half of the fallback backend and a convenience for callers that
-    only need to display a path; mutating callers must use the operations
-    below, which do not re-open a path string they already resolved.
+    Follows *relative* symlinks, refusing any that land outside ``root``;
+    absolute link targets are refused outright on both backends (see
+    :func:`_reject_absolute_links`). This is the validation half of the fallback
+    backend and a convenience for callers that only need to display a path;
+    mutating callers must use the operations below, which do not re-open a path
+    string they already resolved.
     """
     base = Path(root).resolve()
     parts = split_rel(rel)
+    _reject_absolute_links(base, parts)
     p = base.joinpath(*parts) if parts else base
     try:
         rp = p.resolve()
@@ -146,6 +149,7 @@ def _fallback_path(base: Path, parts: list[str]) -> Path:
     because a component list can name a symlink whose target leaves ``base``.
     """
     p = base.joinpath(*parts) if parts else base
+    _reject_absolute_links(base, parts)
     try:
         rp = p.resolve()
     except OSError as e:                              # pragma: no cover
@@ -153,6 +157,51 @@ def _fallback_path(base: Path, parts: list[str]) -> Path:
     if rp != base and base not in rp.parents:
         raise PermissionError("escape")
     return p
+
+
+def _reject_absolute_links(base: Path, parts: list[str]) -> None:
+    """Refuse absolute symlink targets — parity with the anchored walk.
+
+    ``Path.resolve()`` follows an absolute link happily as long as it happens to
+    land back inside ``base``. The anchored backend cannot do that: it implements
+    the ``RESOLVE_BENEATH`` contract, where an absolute link is rejected without
+    regard to where it points, because deciding "does this absolute path stay
+    inside the home?" by resolving it re-opens the TOCTOU window this module
+    exists to close.
+
+    So the portable backend has to refuse it too. Without this the same tree is
+    accepted on a dev box and refused in production, and a suite meant to guard
+    the contract quietly guards a different one — which is how the absolute-link
+    tests came to pass locally while failing on the deployment target.
+
+    Relative targets are expanded against the directory holding the link, exactly
+    as the anchored walk does, and bounded by the same hop limit.
+    """
+    cur = base
+    pending = list(parts)
+    hops = 0
+    while pending:
+        name = pending.pop(0)
+        if name == "..":
+            cur = cur.parent          # containment is checked by the caller
+            continue
+        nxt = cur / name
+        try:
+            if not nxt.is_symlink():
+                cur = nxt
+                continue
+            target = os.readlink(nxt)
+        except OSError:
+            cur = nxt                 # unreadable: let the open report it
+            continue
+        if _is_absolute(target):
+            raise PermissionError("symlink escapes root")
+        hops += 1
+        if hops > MAX_SYMLINK_HOPS:
+            raise PermissionError("too many symlinks")
+        # A relative target resolves against the link's own directory, so `cur`
+        # stays put while the target's components take this link's place.
+        pending = _link_parts(target) + pending
 
 
 # --------------------------------------------------------------------------
@@ -256,10 +305,22 @@ def _walk(base: Path, parts: list[str], leaf_flags: int | None,
             # mypy: leaf_flags is not None whenever is_leaf (guarded above)
             flags = ((leaf_flags or 0) | _O_NOFOLLOW | _O_BINARY) if is_leaf \
                 else (os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_DIRECTORY)
+            # O_NOFOLLOW reports a symlink as ELOOP, but Linux answers ENOTDIR
+            # instead when O_DIRECTORY is also set — which is exactly the
+            # mid-path case. Treating that as a hard error would refuse every
+            # ordinary in-home directory symlink, so a non-leaf hop accepts both
+            # as "this is a link, expand it" and lets readlink decide. A real
+            # ENOTDIR (a file used as a directory) surfaces as EINVAL from
+            # readlink below and is re-reported unchanged.
+            link_errnos: tuple[int, ...]
+            if is_leaf:
+                link_errnos = (errno.ELOOP, errno.EMLINK)
+            else:
+                link_errnos = (errno.ELOOP, errno.EMLINK, errno.ENOTDIR)
             try:
                 fd = os.open(name, flags, leaf_mode, dir_fd=cur)
             except OSError as e:
-                if e.errno not in (errno.ELOOP, errno.EMLINK):
+                if e.errno not in link_errnos:
                     raise _translate(e) from None
                 # This hop is a symlink: read the target through the fd we
                 # already hold (so the swap window is closed), then walk it.
@@ -269,6 +330,11 @@ def _walk(base: Path, parts: list[str], leaf_flags: int | None,
                 try:
                     target = os.readlink(name, dir_fd=cur)
                 except OSError as e2:
+                    if e2.errno == errno.EINVAL:
+                        # Not a link: ENOTDIR really did mean a path component
+                        # is a file ("notes.txt/sub"). Report the open failure,
+                        # not the readlink one.
+                        raise _translate(e) from None
                     raise _translate(e2) from None
                 if _is_absolute(target):
                     raise PermissionError("symlink escapes root") from None

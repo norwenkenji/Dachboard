@@ -408,15 +408,32 @@ def test_range_helper_is_pure():
 
 # ---------- the race the fd streaming exists to close ----------
 
-def test_delivery_opens_once_through_the_anchor(clients, home_with_files,
-                                                monkeypatch):
-    """The path must be opened exactly once, by safepath — never re-opened by name.
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows refuses to unlink a file that has an open "
+                           "handle (WinError 32), so the inode swap below "
+                           "cannot be staged")
+def test_delivery_streams_from_the_descriptor_not_the_name(clients,
+                                                           home_with_files,
+                                                           monkeypatch):
+    """Delivery must serve the descriptor safepath opened, never re-open by name.
 
-    ``FileResponse(path)`` resolves the name at construction and opens it again
-    when the body is sent. In between, the slot user who owns the tree can swap
-    a component for a symlink, and the daemon — which runs as root — opens
-    whatever the link now points at. Streaming from the descriptor safepath
-    already opened leaves no second look-up to race.
+    ``FileResponse(path)`` resolves the name at construction and opens it *again*
+    when the body is sent. In between, the slot user who owns the tree can
+    replace the entry, and the daemon — which runs as root — serves whatever the
+    name now resolves to. Streaming from the already-open descriptor leaves no
+    second look-up to race.
+
+    The proof is a swap, not a descriptor count. Counting ``os.open`` calls is
+    backend-specific: the anchored backend legitimately opens a directory
+    descriptor per hop, so it reports more than the portable fallback — and a
+    fixed count of one happened to hold only on the fallback, which opens by
+    name. That is exactly the behaviour this test exists to forbid, so asserting
+    it proved nothing on Windows and failed on the deployment target.
+
+    Instead the file is unlinked and recreated — a *new inode* — the instant
+    safepath returns the descriptor. A re-open by name would serve the
+    replacement; the held descriptor still refers to the original inode and its
+    original bytes.
     """
     from app import files as F
 
@@ -425,25 +442,83 @@ def test_delivery_opens_once_through_the_anchor(clients, home_with_files,
 
     def spy(root, rel):
         calls.append(str(rel))
-        return real(root, rel)
-
-    opens = []
-    real_open = os.open
-
-    def spy_open(*a, **k):
-        fd = real_open(*a, **k)
-        opens.append(fd)
+        fd = real(root, rel)
+        # The owner's move: swap the entry for a different inode. Truncating in
+        # place would not do — that keeps the same inode, so the descriptor we
+        # just handed back would see the new bytes too and the test would prove
+        # nothing either way.
+        victim = os.path.join(str(root), str(rel))
+        os.unlink(victim)
+        with open(victim, "wb") as fh:
+            fh.write(b"SWAPPED-BY-THE-OWNER")
         return fd
 
     monkeypatch.setattr(F, "open_read_fd", spy)
-    monkeypatch.setattr(os, "open", spy_open)
     login(clients["bob"], "bob")
     r = clients["bob"].get("/api/files/download", params={"path": "blob.bin"})
-    assert r.status_code == 200 and r.content == bytes(range(256))
+
     assert calls == ["blob.bin"]
-    # one descriptor total: no second open-by-name on the way to the client
-    assert len(opens) == 1, opens
-    assert _is_closed(opens[0])
+    assert r.status_code == 200
+    assert r.content == bytes(range(256)), \
+        "served the swapped-in file instead of the open descriptor"
+    # size came from fstat(fd), not from a fresh stat of the path
+    assert r.headers["content-length"] == "256"
+
+
+def test_delivery_never_reopens_the_target_by_name(clients, home_with_files,
+                                                   monkeypatch):
+    """No second name resolution of the target after safepath hands back an fd.
+
+    The portable companion to the inode-swap test above, and the one that runs
+    everywhere: it states the same property directly instead of through its
+    consequence. Every ``os.open`` and builtin ``open`` is recorded, but only
+    ones that name the target *after* the descriptor was handed back count —
+    safepath's own opens (including the fallback backend's single open-by-name,
+    and the anchored backend's per-hop directory descriptors) happen before that
+    point and are not what this is about.
+    """
+    import builtins
+
+    from app import files as F
+
+    handed_back: list[int] = []
+    late: list[tuple[str, str]] = []
+    real_read_fd = F.open_read_fd
+    real_os_open = os.open
+    real_builtin_open = builtins.open
+
+    def names_target(file) -> bool:
+        try:
+            p = os.fspath(file)
+        except TypeError:
+            return False          # an fd, a file object, an int — not a path
+        return isinstance(p, str) and os.path.basename(p) == "blob.bin"
+
+    def spy_read_fd(root, rel):
+        fd = real_read_fd(root, rel)
+        handed_back.append(fd)
+        return fd
+
+    def spy_os_open(file, *a, **k):
+        if handed_back and names_target(file):
+            late.append(("os.open", os.fspath(file)))
+        return real_os_open(file, *a, **k)
+
+    def spy_builtin_open(file, *a, **k):
+        if handed_back and names_target(file):
+            late.append(("open", os.fspath(file)))
+        return real_builtin_open(file, *a, **k)
+
+    monkeypatch.setattr(F, "open_read_fd", spy_read_fd)
+    monkeypatch.setattr(os, "open", spy_os_open)
+    monkeypatch.setattr(builtins, "open", spy_builtin_open)
+
+    login(clients["bob"], "bob")
+    r = clients["bob"].get("/api/files/download", params={"path": "blob.bin"})
+
+    assert r.status_code == 200 and r.content == bytes(range(256))
+    assert len(handed_back) == 1, handed_back
+    assert late == [], f"re-opened by name during delivery: {late}"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics")
