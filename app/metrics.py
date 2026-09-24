@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import time
+from contextlib import suppress
 
 
 def _read(path: str) -> str | None:
@@ -19,7 +20,7 @@ def _read(path: str) -> str | None:
 def cpu_percent() -> float:
     try:
         def snap():
-            parts = _read("/proc/stat").splitlines()[0].split()[1:]
+            parts = (_read("/proc/stat") or "").splitlines()[0].split()[1:]
             nums = [int(x) for x in parts]
             idle = nums[3] + nums[4]
             return sum(nums), idle
@@ -36,7 +37,7 @@ def mem() -> dict:
     out = {"total": 0, "used": 0, "free": 0}
     try:
         info = {}
-        for line in _read("/proc/meminfo").splitlines():
+        for line in (_read("/proc/meminfo") or "").splitlines():
             k, v = line.split(":", 1)
             info[k] = int(v.split()[0]) * 1024
         out = {"total": info.get("MemTotal", 0),
@@ -66,10 +67,8 @@ def temps() -> dict:
                 continue
             t = _read(f"{base}/{zone}/type") or zone
             raw = _read(f"{base}/{zone}/temp")
-            try:
+            with suppress(ValueError, TypeError):
                 out[t] = int(raw) / 1000.0 if raw and int(raw) > 1000 else (float(raw) if raw else 0)
-            except (ValueError, TypeError):
-                pass
     except OSError:
         pass
     return out
@@ -84,8 +83,11 @@ def load() -> list:
 
 def uptime() -> float:
     try:
-        return float(_read("/proc/uptime").split()[0])
-    except (OSError, ValueError, AttributeError):
+        return float((_read("/proc/uptime") or "").split()[0])
+    except (OSError, ValueError, IndexError, TypeError):
+        # IndexError/TypeError: the file is missing, empty or unreadable. It was
+        # AttributeError before, which never fires — a None has no .split, but
+        # `or ""` made it an empty string whose [0] raises IndexError instead.
         return 0.0
 
 
@@ -130,7 +132,8 @@ def host_info() -> dict:
 def _docker(args: list, timeout: int = 10) -> subprocess.CompletedProcess:
     if not shutil.which("docker"):
         raise FileNotFoundError("docker")
-    return subprocess.run(["docker"] + args, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(["docker", *args], capture_output=True, text=True,
+                          timeout=timeout)
 
 
 def containers() -> list:

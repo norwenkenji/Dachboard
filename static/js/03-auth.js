@@ -117,7 +117,9 @@ const TABS = [
 ];
 const TABVIS = {
   overview: () => has("overview"),
-  services: () => has("containers_view"),
+  // docker and systemd are separate rights now: a user may see containers
+  // without any host-unit access.
+  services: () => has("containers_view") || has("services_view"),
   console: () => has("commands_run") || has("terminal"),
   files: () => has("files"),
   users: () => has("users_manage"),

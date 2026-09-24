@@ -1,0 +1,7 @@
+# Development / CI dependencies. Never installed on a production server.
+-r requirements.txt
+
+pytest>=8,<9
+httpx>=0.27,<1.0
+ruff>=0.6,<1.0
+mypy>=1.11,<2.0

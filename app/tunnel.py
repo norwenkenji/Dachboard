@@ -40,7 +40,7 @@ def refresh() -> None:
 
 def _run_provider(provider: str, args: list[str]) -> str | None:
     try:
-        r = subprocess.run([provider] + list(args or []),
+        r = subprocess.run([provider, *(args or [])],
                            capture_output=True, text=True, timeout=15)
         m = URL_RE.search(r.stdout + "\n" + r.stderr)
         return m.group(0).rstrip(").,") if m else None

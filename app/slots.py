@@ -50,11 +50,11 @@ def cpu_to_docker(cpu: str | None) -> str | None:
         try:
             return str(float(num) / 100).rstrip("0").rstrip(".") or "0"
         except ValueError:
-            raise ValueError(f"bad cpu quota: {cpu!r}")
+            raise ValueError(f"bad cpu quota: {cpu!r}") from None
     try:
         float(s)
     except ValueError:
-        raise ValueError(f"bad cpu quota: {cpu!r}")
+        raise ValueError(f"bad cpu quota: {cpu!r}") from None
     return s
 
 
@@ -142,7 +142,10 @@ def provision_plan(slot: str, image: str = IMAGE_DEFAULT,
     s = valid_slot(slot)
     if disk_quota:
         Q.parse_size(disk_quota)  # validate early, fail before touching anything
-    steps = [{"desc": f"create linux user {s}", "argv": useradd_argv(s)}]
+    # list[dict] not list[dict[str, ...]]: some steps carry an extra "optional"
+    # flag, so a value type inferred from the first literal would reject them.
+    steps: list[dict] = [{"desc": f"create linux user {s}",
+                          "argv": useradd_argv(s)}]
     for argv in home_perms_argv(s):
         steps.append({"desc": f"own {home_dir(s)}", "argv": argv})
     for kind in ("pgdata", "work"):
@@ -162,8 +165,8 @@ def provision_plan(slot: str, image: str = IMAGE_DEFAULT,
 def remove_plan(slot: str, wipe_data: bool = False) -> list[dict]:
     """Ordered steps to tear a slot down. Pure: no execution."""
     s = valid_slot(slot)
-    steps = [{"desc": f"remove container {container_name(s)}",
-              "argv": container_rm_argv(s)}]
+    steps: list[dict] = [{"desc": f"remove container {container_name(s)}",
+                          "argv": container_rm_argv(s)}]
     if wipe_data:
         for kind in ("pgdata", "work"):
             steps.append({"desc": f"remove volume {volume_name(s, kind)}",
@@ -204,8 +207,10 @@ def apply_plan(plan: list[dict], dry_run: bool = False,
                         "output": out.strip()[-500:]})
         if code != 0 and not s.get("optional"):
             return {"dry_run": False, "ok": False, "steps": results}
+    # results and plan are always the same length here: the loop either runs to
+    # completion or returns early, so strict is a real invariant, not a guess.
     ok = all(r["code"] == 0 or s.get("optional")
-             for r, s in zip(results, plan))
+             for r, s in zip(results, plan, strict=True))
     return {"dry_run": False, "ok": ok, "steps": results}
 
 

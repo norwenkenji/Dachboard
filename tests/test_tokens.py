@@ -16,6 +16,7 @@ def test_token_tunnel_no_cookie(clients):
     assert t["token"].startswith("dach_")
     # brand-new client, no session cookie at all
     from fastapi.testclient import TestClient
+
     import app.main as main
     with TestClient(main.app) as anon:
         r = anon.get("/api/tunnel",
@@ -34,6 +35,7 @@ def test_token_scoped_and_revoked(clients):
     a = clients["admin"]
     t = _admin_token(a, csrf, name="narrow", rights={"overview": True})
     from fastapi.testclient import TestClient
+
     import app.main as main
     with TestClient(main.app) as anon:
         h = {"Authorization": f"Bearer {t['token']}"}

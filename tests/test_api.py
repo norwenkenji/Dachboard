@@ -1,5 +1,7 @@
 """Full-stack API tests: auth, CSRF, RBAC gates, CRUD, runs, files, tunnel."""
+import json
 import sys
+from urllib.parse import quote
 
 from conftest import login
 
@@ -164,6 +166,43 @@ def test_files_flow(clients, env):
     assert q["used"] >= 0
 
 
+def test_upload_file_field_sent_as_string_is_400_not_500(clients):
+    """A `file` part sent as a plain form field is a bad request, not a crash.
+
+    Regression: the handler dereferenced `.filename` on whatever the multipart
+    parser returned. A string field (no filename) made that an AttributeError,
+    so any client with the `files` right could turn a malformed upload into an
+    unhandled 500 — and the daemon logs a traceback for it.
+    """
+    csrf = login(clients["bob"], "bob")
+    r = clients["bob"].post("/api/files/upload", data={"file": "hello"},
+                            headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 400, r.text
+    assert "file part" in r.text
+
+    # the multi-part variant is rejected the same way, mixed in with a real file
+    r = clients["bob"].post(
+        "/api/files/upload",
+        data={"file": "hello"},
+        files=[("file", ("ok.txt", b"x", "text/plain"))],
+        headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 400, r.text
+
+
+def test_upload_real_file_still_works(clients, env):
+    """The str guard must not break the normal path."""
+    import pathlib
+
+    csrf = login(clients["bob"], "bob")
+    r = clients["bob"].post(
+        "/api/files/upload",
+        files={"file": ("real.txt", b"content", "text/plain")},
+        headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 200, r.text
+    assert r.json()["files"] == [{"name": "real.txt", "size": 7}]
+    assert (pathlib.Path(env["homes"]["bob"]) / "real.txt").read_bytes() == b"content"
+
+
 def test_admin_files_other_slot(clients):
     login(clients["admin"], "admin")
     a = clients["admin"]
@@ -177,7 +216,10 @@ def test_metrics_services_containers(clients):
     m = b.get("/api/metrics").json()
     assert set(m) >= {"cpu", "mem", "disk", "temps", "load", "uptime"}
     assert isinstance(b.get("/api/metrics/history").json(), list)
-    assert isinstance(b.get("/api/services").json(), list)
+    # host-wide systemd is admin-only now: a plain user must not list units
+    assert b.get("/api/services").status_code == 403
+    login(clients["admin"], "admin")
+    assert isinstance(clients["admin"].get("/api/services").json(), list)
 
 
 def test_tunnel(clients):
@@ -213,6 +255,9 @@ def test_service_logs_and_action(clients):
     assert r.status_code == 200 and isinstance(r.json()["logs"], str)
     r = a.get("/api/services/evil;rm/logs")
     assert r.status_code == 400
+    # a unit name with a trailing newline passes .match() but not .fullmatch():
+    # argv is not a shell, but the check should not be weaker than it looks
+    assert a.get("/api/services/dachboard.service%0A/logs").status_code == 400
     bcsrf = login(clients["bob"], "bob")
     b = clients["bob"]
     r = b.post("/api/services/cron.service/restart",
@@ -221,6 +266,44 @@ def test_service_logs_and_action(clients):
     r = a.post("/api/services/cron.service/frobnicate",
                headers={"X-CSRF-Token": acsrf})
     assert r.status_code == 400
+
+
+def test_containers_control_does_not_grant_systemctl(clients, env):
+    """HIGH: containers_control must never imply host-wide systemd control.
+
+    The daemon runs systemctl as root, so a non-admin holding the container
+    checkbox used to be able to stop sshd or dachboard itself.
+    """
+    from contextlib import closing
+
+    from app import db as D
+    with closing(D.connect(env["db"])) as con:
+        con.execute("UPDATE users SET rights=? WHERE login='bob'",
+                    (json.dumps({"overview": True, "containers_view": True,
+                                 "containers_control": True}),))
+        con.commit()
+    bcsrf = login(clients["bob"], "bob")
+    b = clients["bob"]
+    h = {"X-CSRF-Token": bcsrf}
+    assert b.get("/api/services").status_code == 403
+    assert b.get("/api/services/cron.service/logs").status_code == 403
+    for unit in ("cron.service", "sshd.service", "dachboard.service"):
+        assert b.post(f"/api/services/{unit}/stop", headers=h).status_code == 403
+    # the container surface itself still works (docker absent -> empty list)
+    assert b.get("/api/containers").status_code == 200
+
+
+def test_container_name_validation(clients):
+    """A container name reaching the docker CLI must not be parseable as a flag."""
+    acsrf = login(clients["admin"], "admin")
+    a = clients["admin"]
+    h = {"X-CSRF-Token": acsrf}
+    bad = ["-f", "--tail", "-x", "", "..", "a b", "a;b"]
+    for name in bad:
+        r = a.get(f"/api/containers/{quote(name, safe='')}/logs")
+        assert r.status_code in (400, 404), (name, r.status_code)
+        r = a.post(f"/api/containers/{quote(name, safe='')}/stop", headers=h)
+        assert r.status_code in (400, 404), (name, r.status_code)
 
 
 def test_files_move_copy_api(clients):
@@ -237,9 +320,11 @@ def test_files_move_copy_api(clients):
     r = b.post("/api/files/copy", json={"path": "m2.txt", "to": "m3.txt"}, headers=h)
     assert r.status_code == 200
     r = b.post("/api/files/move", json={"path": "m2.txt", "to": "../x"}, headers=h)
-    assert r.status_code == 400
+    assert r.status_code == 400                     # escape attempt
     r = b.post("/api/files/copy", json={"path": "m2.txt", "to": "m3.txt"}, headers=h)
-    assert r.status_code == 400
+    assert r.status_code == 409                     # target already exists
+    r = b.post("/api/files/move", json={"path": "m2.txt", "to": "m3.txt"}, headers=h)
+    assert r.status_code == 409                     # same for rename
 
 
 def test_admin_root_files_and_terminal(clients):

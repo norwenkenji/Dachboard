@@ -93,6 +93,8 @@ location = /dash-auth-${slot} {
     proxy_set_header Cookie \$http_cookie;
     proxy_set_header X-Target term;
     proxy_set_header X-Slot ${slot};
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
 }
 # interactive shell: no buffering, no Nagle, long-lived socket
 location /term/${slot}/ {
@@ -128,9 +130,19 @@ FSTYPE=$(findmnt -n -o FSTYPE / 2>/dev/null || echo unknown)
 if [ "$FSTYPE" = "ext4" ]; then
   echo "enabling usrquota on / ..."
   python3 - <<'EOF' || echo "fstab edit skipped"
-import shutil
+import os
 p = '/etc/fstab'
-shutil.copy(p, '/etc/fstab.dachbak')
+bak = '/etc/fstab.dachbak'
+# Keep the FIRST backup pristine. README tells people to re-run the installer
+# on upgrade, and copying every time would replace the untouched original with
+# an already-modified file — losing the ability to roll the quota change back.
+if not os.path.exists(bak):
+    with open(p, 'rb') as src, open(bak, 'wb') as dst:
+        dst.write(src.read())
+    os.chmod(bak, 0o644)
+    print('fstab backup created')
+else:
+    print('fstab backup already present, left untouched')
 lines = open(p).read().splitlines(keepends=True)
 out = []
 for ln in lines:
@@ -167,6 +179,8 @@ location = /dash-auth-root {
     proxy_set_header Cookie \$http_cookie;
     proxy_set_header X-Target term;
     proxy_set_header X-Slot root;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
 }
 location /term/root/ {
     auth_request /dash-auth-root;

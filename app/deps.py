@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import time
-from contextlib import closing
+from contextlib import closing, suppress
 from contextvars import ContextVar
 from pathlib import Path
 
 import yaml
 from fastapi import HTTPException, Request
 
+from . import audit as AUDIT
 from . import auth as A
 from . import db as D
+from . import security as SEC
 from .rbac import can
 
 HERE = Path(__file__).resolve().parent
@@ -33,9 +36,49 @@ DB = CFG.get("db_path", "/opt/dachboard/data/dachboard.sqlite3")
 SECRET_FILE = CFG.get("secret_file", "/opt/dachboard/.secret")
 COOKIE = "dach_sid"
 LOGIN_FAILS: dict[str, list[float]] = {}
+
+#: Login throttle. The window and the cap are what an operator tunes; the key
+#: bound is what keeps a flood of distinct source addresses from turning the
+#: dict into an unbounded memory leak.
+LOGIN_FAIL_WINDOW = 600          # seconds a failure counts for
+LOGIN_FAIL_MAX = 10              # failures inside the window -> 429
+LOGIN_FAIL_MAX_KEYS = 4096       # tracked addresses before the oldest is evicted
+
 # Set by the request middleware so require()/check_csrf() see the request even
 # in endpoints that don't declare it. Lets Bearer tokens work on every route.
 CURRENT_REQUEST: ContextVar[Request | None] = ContextVar("current_request", default=None)
+
+
+def _prune(ts: list[float], now: float) -> list[float]:
+    """Drop entries older than the window, in place-safe fashion."""
+    return [t for t in ts if now - t < LOGIN_FAIL_WINDOW]
+
+
+def login_blocked(ip: str) -> bool:
+    """Whether this address has burned its budget inside the window."""
+    return len(_prune(LOGIN_FAILS.get(ip, []), time.time())) >= LOGIN_FAIL_MAX
+
+
+def note_login_failure(ip: str) -> int:
+    """Record a failed attempt; returns how many are live in the window.
+
+    Stale buckets are dropped here rather than on read, and the dict is capped:
+    without either, one sweep of spoofed addresses (or simply months of uptime
+    behind a NAT pool) grows it forever.
+    """
+    now = time.time()
+    fails = _prune(LOGIN_FAILS.get(ip, []), now)
+    fails.append(now)
+    LOGIN_FAILS[ip] = fails
+    if len(LOGIN_FAILS) > LOGIN_FAIL_MAX_KEYS:
+        for k in sorted(LOGIN_FAILS, key=lambda k: max(LOGIN_FAILS[k] or [0]))[
+                :len(LOGIN_FAILS) - LOGIN_FAIL_MAX_KEYS]:
+            del LOGIN_FAILS[k]
+    return len(fails)
+
+
+def clear_login_failures(ip: str) -> None:
+    LOGIN_FAILS.pop(ip, None)
 
 
 def secret() -> str:
@@ -46,10 +89,8 @@ def secret() -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
         s = secrets.token_hex(32)
         p.write_text(s)
-        try:
+        with suppress(OSError):
             p.chmod(0o600)
-        except OSError:
-            pass
         return s
     except OSError:
         return secrets.token_hex(32)
@@ -98,14 +139,11 @@ def ensure_setup_token() -> str | None:
             return p.read_text().strip() or None
         except OSError:
             return None
-    import logging
     tok = A.new_token()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(tok)
-    try:
+    with suppress(OSError):
         p.chmod(0o600)
-    except OSError:
-        pass
     logging.getLogger("dachboard").warning("SETUP TOKEN (one-time): %s", tok)
     return tok
 
@@ -150,14 +188,25 @@ async def require(right: str, token: str | None, request: Request | None = None)
         t = token_subject(request)
         if t:
             if not can(t, right):
+                AUDIT.denied(t, right, SEC.client_ip(request, CFG))
                 raise HTTPException(403, "forbidden")
             return t
         authz = request.headers.get("authorization", "")
         if authz.lower().startswith("bearer "):
+            # A presented-but-unknown token is worth recording: it is either a
+            # revoked token still in use somewhere, or someone guessing.
+            AUDIT.event("bad_token", right=right,
+                        ip=SEC.client_ip(request, CFG))
             raise HTTPException(401, "bad token")
     u = await session_user(token)
-    if not u or not can(u, right):
-        raise HTTPException(403 if u else 401, "forbidden")
+    if not u:
+        # Anonymous 401s are routine (the SPA probes /api/me before login), so
+        # they are deliberately not audited — only real denials are.
+        raise HTTPException(401, "forbidden")
+    if not can(u, right):
+        AUDIT.denied(u, right,
+                     SEC.client_ip(request, CFG) if request is not None else None)
+        raise HTTPException(403, "forbidden")
     return u
 
 
@@ -173,6 +222,10 @@ def check_csrf(request: Request, token: str | None) -> None:
             want = r["csrf"] if r else None
     got = request.headers.get("x-csrf-token")
     if not want or not got or not secrets.compare_digest(want, got):
+        # A rejected CSRF check on a live session is either a stale tab or a
+        # cross-site request someone just attempted. Either way: one line.
+        AUDIT.event("csrf_rejected", method=request.method,
+                    path=request.url.path, ip=SEC.client_ip(request, CFG))
         raise HTTPException(403, "bad csrf")
 
 

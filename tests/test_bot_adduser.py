@@ -3,6 +3,7 @@ root for a non-admin account with a valid, non-reserved slot name. Slot name
 rules and the registry live in app/provision.py (tested in test_provision.py)."""
 import importlib.util
 import json
+import os
 import pathlib
 
 import pytest
@@ -99,11 +100,41 @@ def test_create_rejects_bad_slot_name(helper, env):
     assert "slot:" in result(helper)["msg"]
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Windows chmod only has a read-only bit")
 def test_done_result_is_owner_readable_only(helper):
-    """res.json carries the created login: never world- or group-readable."""
+    """res.json carries the created login: never world- or group-readable.
+
+    Posix-only assertion. On Windows ``os.chmod`` can set exactly one bit
+    (read-only), so requesting ``0o600`` leaves ``0o666`` regardless of what
+    the code asks for — the check would be measuring the platform, not us.
+    The script itself only ever runs on the Debian/Ubuntu server.
+    """
     helper.done(True, "ok", login="motya", slot="motya")
     mode = helper.RES.stat().st_mode & 0o777
     assert mode & 0o077 == 0, f"res.json too open: {oct(mode)}"
+
+
+def test_done_locks_the_mode_even_when_chown_is_impossible(helper, monkeypatch):
+    """Regression: chmod must not be hostage to resolving the zxc account.
+
+    res.json carries the freshly created login. The old order ran chmod inside
+    the same try block as getpwnam/chown, so any failure on the chown side left
+    the file at its default mode, readable by every local user.
+    """
+    chmod_calls = []
+    monkeypatch.setattr(helper.os, "chmod",
+                        lambda p, m: chmod_calls.append((p, m)))
+
+    def boom(name):
+        raise KeyError(name)
+
+    # pwd present but the account is gone — the chown half must still fail
+    fake_pwd = type("FakePwd", (), {"getpwnam": staticmethod(boom)})
+    monkeypatch.setattr(helper, "pwd", fake_pwd)
+
+    helper.done(True, "ok", login="motya", slot="motya")
+    assert chmod_calls and chmod_calls[0][1] == 0o600, \
+        "chmod 0600 must run even when chown cannot"
 
 
 def test_req_file_is_consumed(helper, env, monkeypatch):

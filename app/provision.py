@@ -69,6 +69,9 @@ def nginx_term_conf(slot: str, port: int) -> str:
     proxy_set_header Cookie $http_cookie;
     proxy_set_header X-Target term;
     proxy_set_header X-Slot {slot};
+    # audit records the real client, not the proxy's loopback address
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 }}
 location /term/{slot}/ {{
     auth_request /dash-auth-{slot};

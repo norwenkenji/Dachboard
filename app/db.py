@@ -101,6 +101,21 @@ def prune_metrics(path: str | Path, keep_hours: int = 24) -> None:
         con.commit()
 
 
+def prune_sessions(path: str | Path) -> int:
+    """Delete expired sessions; returns how many went.
+
+    A session row outlives its cookie: nothing ever removed one that simply ran
+    out of time, so the table grew for the lifetime of the install. It is also
+    the table every authenticated request writes to (the sliding TTL update), so
+    leaving it unbounded slows the hot path, not just backups.
+    """
+    with closing(connect(path)) as con:
+        cur = con.execute("DELETE FROM sessions WHERE expires_at < ?",
+                          (int(time.time()),))
+        con.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+
 def jload(s: str | None, default):
     try:
         return json.loads(s) if s else default

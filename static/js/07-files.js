@@ -30,16 +30,33 @@ function ficon(name, dir) {
   const e = (name.split(".").pop() || "").toLowerCase();
   return EXT_ICON[e] || "file";
 }
+/* What the server will render inline (see MEDIA_TYPES in app/security.py).
+   Anything outside this list is download-only, so the two must not drift:
+   a type we call "image" but the server refuses would show a broken frame. */
+const PREVIEWABLE = {
+  image: new Set("png,jpg,jpeg,gif,webp,bmp,ico,avif".split(",")),
+  video: new Set("mp4,webm,mov,mkv,avi".split(",")),
+  audio: new Set("mp3,wav,ogg,m4a,flac".split(",")),
+  pdf: new Set(["pdf"]),
+};
 function mediaKind(name) {
   const e = (name.split(".").pop() || "").toLowerCase();
-  const k = EXT_ICON[e];
-  if (k === "img") return "image";
-  if (k === "video") return "video";
-  if (k === "music") return "audio";
-  if (e === "pdf") return "pdf";
+  // svg is a vector format that can carry scripts: the server refuses it for
+  // inline preview, so treat it as a plain download here too.
+  if (e === "svg") return "bin";
+  if (PREVIEWABLE.image.has(e)) return "image";
+  if (PREVIEWABLE.video.has(e)) return "video";
+  if (PREVIEWABLE.audio.has(e)) return "audio";
+  if (PREVIEWABLE.pdf.has(e)) return "pdf";
   if (TEXT_EXTS.has(e)) return "text";
   return "bin";
 }
+/* The server only ever renders a fixed allow-list of passive media inline,
+   under a sandboxed CSP. Everything else must go through the download
+   endpoint, which forces Content-Disposition: attachment. So the preview URL
+   and the download URL are deliberately different endpoints. */
+const previewUrl = (rel) => u("/api/files/preview?path=" + encodeURIComponent(rel));
+const downloadUrl = (rel) => u("/api/files/download?path=" + encodeURIComponent(rel));
 const fmtSize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1) + " MiB" : Math.max(1, Math.round(b / 1024)) + " KiB");
 const fmtDate = (ts) => { try { return new Date(ts * 1000).toLocaleString(); } catch { return ""; } };
 const relOf = (name) => (fPath ? fPath + "/" + name : name);
@@ -90,12 +107,13 @@ function modal(html) {
 async function previewFile(name) {
   const rel = relOf(name);
   const kind = mediaKind(name);
-  const url = u("/api/files/download?path=" + encodeURIComponent(rel));
-  if (kind === "image") { modal(`<img src="${url}" alt="">`); return; }
-  if (kind === "video") { modal(`<video src="${url}" controls></video>`); return; }
-  if (kind === "audio") { modal(`<audio src="${url}" controls style="width:100%"></audio>`); return; }
+  const dl = downloadUrl(rel);
+  const pv = previewUrl(rel);
+  if (kind === "image") { modal(`<img src="${pv}" alt="">`); return; }
+  if (kind === "video") { modal(`<video src="${pv}" controls></video>`); return; }
+  if (kind === "audio") { modal(`<audio src="${pv}" controls style="width:100%"></audio>`); return; }
   if (kind === "pdf") {
-    modal(`<iframe src="${url}" style="width:80vw;height:75vh;border:0;border-radius:8px;background:#fff"></iframe>`);
+    modal(`<iframe src="${pv}" style="width:80vw;height:75vh;border:0;border-radius:8px;background:#fff"></iframe>`);
     return;
   }
   if (kind === "text") {
@@ -106,7 +124,7 @@ async function previewFile(name) {
     modal(`<div class="dim mono" style="margin-bottom:8px">${esc(rel)}</div>
       <textarea id="m-text" spellcheck="false"></textarea>
       <div class="row"><button id="m-save" class="primary">${ic("check")}${t("save")}</button>
-      <a class="btn ghost" href="${url}">${ic("trash")}${t("fm_download")}</a></div>`);
+      <a class="btn ghost" href="${dl}">${ic("download")}${t("fm_download")}</a></div>`);
     $("#m-text").value = content;
     $("#m-save").onclick = async () => {
       await api("/api/files/write", { method: "POST",
@@ -119,7 +137,7 @@ async function previewFile(name) {
     return;
   }
   modal(`<p>${esc(rel)}</p><p class="dim">${t("fm_binary")}</p>
-    <div class="row"><a class="btn primary" href="${url}">${ic("trash")}${t("fm_download")}</a></div>`);
+    <div class="row"><a class="btn primary" href="${dl}">${ic("download")}${t("fm_download")}</a></div>`);
 }
 
 async function vFiles() {
@@ -288,7 +306,7 @@ function rowMenu(x, y, name, isDir) {
     [t("fm_download"), "download", () => {
       if (isDir) return;
       const a = document.createElement("a");
-      a.href = u("/api/files/download?path=" + encodeURIComponent(relOf(name)));
+      a.href = downloadUrl(relOf(name));
       a.download = name;
       a.click();
     }, isDir],
@@ -306,7 +324,7 @@ function freshMenu(x, y) {
   openMenu(x, y, [
     [t("fm_new_file"), "file", () => inlineCreate(false)],
     [t("fm_new_folder"), "folder", () => inlineCreate(true)],
-    [t("fm_upload"), "download", () => document.getElementById("f-upfile")?.click()],
+    [t("fm_upload"), "up", () => document.getElementById("f-upfile")?.click()],
     [t("fm_upload_dir"), "folder", () => document.getElementById("f-updir")?.click()],
     [t("fm_paste"), "clipboard", doPaste, !fClip],
   ]);

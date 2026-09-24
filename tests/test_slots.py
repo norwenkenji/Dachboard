@@ -112,7 +112,7 @@ def test_container_limits_applied(monkeypatch):
         return 0, "dach-u-c1"
 
     monkeypatch.setattr(S.R, "run_as", fake)
-    ok, msg = S.apply_container_limits("u-c1", mem="2G")
+    ok, _msg = S.apply_container_limits("u-c1", mem="2G")
     assert ok is True
     assert seen[0][:2] == ["docker", "inspect"]
     assert "--memory" in seen[1]

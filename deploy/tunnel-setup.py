@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 import time
 import urllib.request
 
@@ -40,7 +39,7 @@ def cf(method: str, path: str, token: str, payload: dict | None = None) -> dict:
         with urllib.request.urlopen(req, timeout=30) as r:
             body = json.loads(r.read().decode())
     except Exception as e:
-        raise SystemExit(f"cloudflare api error on {method} {path}: {e}")
+        raise SystemExit(f"cloudflare api error on {method} {path}: {e}") from e
     if not body.get("success"):
         raise SystemExit(f"cloudflare rejected {method} {path}: {body.get('errors')}")
     return body["result"]
@@ -82,7 +81,7 @@ def upsert_cname(token: str, zone_id: str, host: str, target: str) -> None:
 
 def docker_run(name: str, args: list[str], dry: bool) -> None:
     if dry:
-        print("would run: docker", " ".join(["run", "-d", "--name", name] + args))
+        print("would run: docker", " ".join(["run", "-d", "--name", name, *args]))
         return
     has = sh("docker", "ps", "-a", "--format", "{{.Names}}", capture=True).stdout.split()
     if name in has:

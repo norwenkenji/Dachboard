@@ -1,21 +1,18 @@
+import asyncio
 import json
 import time
 from contextlib import closing
-from fastapi import APIRouter, Cookie, Request
+
+from fastapi import APIRouter, Cookie, HTTPException, Request
+
+from .. import audit as AUDIT
 from .. import db as D
 from .. import deps as P
 from .. import runner as R
-from fastapi import HTTPException
-import asyncio
+from .. import security as SEC
 
 router = APIRouter()
 # ---------- commands ----------
-
-def _cmd_row_UNUSED(r) -> dict:
-    return {"id": r["id"], "name": r["name"],
-            "argv": json.loads(r["argv"]), "run_as": r["run_as"],
-            "allowed": json.loads(r["allowed"]), "timeout_sec": r["timeout_sec"]}
-
 
 @router.get("/api/commands")
 async def commands_list(dach_sid: str | None = Cookie(default=None)):
@@ -38,47 +35,60 @@ async def commands_create(request: Request, dach_sid: str | None = Cookie(defaul
     argv = body.get("argv")
     if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
         raise HTTPException(400, "argv must be string array (no shell)")
+    run_as = body.get("run_as", "owner")
     with closing(D.connect(P.DB)) as con:
         try:
             cur = con.execute(
                 "INSERT INTO commands(name,argv,run_as,allowed,timeout_sec,created_at)"
                 " VALUES(?,?,?,?,?,?)",
-                (body.get("name"), json.dumps(argv), body.get("run_as", "owner"),
+                (body.get("name"), json.dumps(argv), run_as,
                  json.dumps(body.get("allowed", [])), int(body.get("timeout_sec", 60)),
                  int(time.time())))
             con.commit()
-            return {"id": cur.lastrowid}
         except Exception as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from None
+    # A preset command is a stored root-side execution primitive: who defined
+    # it, and to run as whom, is the part worth keeping.
+    AUDIT.event("command_create", cmd_id=cur.lastrowid, cmd=body.get("name"),
+                run_as=run_as, ip=SEC.client_ip(request, P.CFG),
+                **AUDIT.actor(u))
+    return {"id": cur.lastrowid}
 
 
 @router.put("/api/commands/{cid}")
 async def commands_update(cid: int, request: Request,
                           dach_sid: str | None = Cookie(default=None)):
-    await P.require("commands_edit", dach_sid)
+    u = await P.require("commands_edit", dach_sid)
     P.check_csrf(request, dach_sid)
     body = await request.json()
     argv = body.get("argv", [])
     if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
         raise HTTPException(400, "argv must be string array (no shell)")
+    run_as = body.get("run_as", "owner")
     with closing(D.connect(P.DB)) as con:
         con.execute("UPDATE commands SET name=?,argv=?,run_as=?,allowed=?,timeout_sec=?"
                     " WHERE id=?",
-                    (body.get("name"), json.dumps(body.get("argv", [])),
-                     body.get("run_as", "owner"), json.dumps(body.get("allowed", [])),
+                    (body.get("name"), json.dumps(argv), run_as,
+                     json.dumps(body.get("allowed", [])),
                      int(body.get("timeout_sec", 60)), cid))
         con.commit()
+    AUDIT.event("command_update", cmd_id=cid, cmd=body.get("name"),
+                run_as=run_as, ip=SEC.client_ip(request, P.CFG),
+                **AUDIT.actor(u))
     return {"ok": True}
 
 
 @router.delete("/api/commands/{cid}")
 async def commands_delete(cid: int, request: Request,
                           dach_sid: str | None = Cookie(default=None)):
-    await P.require("commands_edit", dach_sid)
+    u = await P.require("commands_edit", dach_sid)
     P.check_csrf(request, dach_sid)
     with closing(D.connect(P.DB)) as con:
+        row = con.execute("SELECT name FROM commands WHERE id=?", (cid,)).fetchone()
         con.execute("DELETE FROM commands WHERE id=?", (cid,))
         con.commit()
+    AUDIT.event("command_delete", cmd_id=cid, cmd=row["name"] if row else "-",
+                ip=SEC.client_ip(request, P.CFG), **AUDIT.actor(u))
     return {"ok": True}
 
 
@@ -93,6 +103,7 @@ async def commands_run(cid: int, request: Request,
             raise HTTPException(404, "no command")
         c = P.cmd_row(r)
     if not (u["is_admin"] or u["id"] in c["allowed"] or "*" in c["allowed"]):
+        AUDIT.denied(u, f"commands_run:{c['name']}")
         raise HTTPException(403, "not allowed")
     run_as, use_slice = None, False
     use_container = False
@@ -118,6 +129,12 @@ async def commands_run(cid: int, request: Request,
                     " VALUES(?,?,?,?,?)",
                     (cid, u["id"], int(time.time()), code, out[-8000:]))
         con.commit()
+    # `runs` keeps the output; the audit line keeps the *identity* of the
+    # execution — including the effective uid, which is what decides whether
+    # this was a slot command or a root one.
+    AUDIT.event("command_run", cmd_id=cid, cmd=c["name"], exit=code,
+                effective_user=run_as or ("container" if use_container else "root"),
+                **AUDIT.actor(u))
     return {"code": code, "output": out}
 
 
@@ -135,15 +152,6 @@ async def runs_list(dach_sid: str | None = Cookie(default=None)):
 
 # ---------- terminal ----------
 
-def _slot_port_UNUSED(slot: str) -> int | None:
-    if slot == "root":
-        return int(P.CFG.get("ttyd", {}).get("port_base", 7681)) - 1
-    slots: list = P.CFG.get("slots", [])
-    if slot in slots:
-        return int(P.CFG.get("ttyd", {}).get("port_base", 7681)) + slots.index(slot)
-    return None
-
-
 @router.post("/api/terminal/ensure")
 async def terminal_ensure(request: Request, dach_sid: str | None = Cookie(default=None)):
     u = await P.require("terminal", dach_sid)
@@ -152,8 +160,10 @@ async def terminal_ensure(request: Request, dach_sid: str | None = Cookie(defaul
     # no slot exposed outside: admin lands in root, others in their own slot
     slot = body.get("slot") or u["slot"] or ("root" if u["is_admin"] else None)
     if slot == "root" and not u["is_admin"]:
+        AUDIT.denied(u, "terminal:root")
         raise HTTPException(403, "admin only")
     if not u["is_admin"] and slot != (u["slot"] or ""):
+        AUDIT.denied(u, f"terminal:{slot}")
         raise HTTPException(403, "not yours")
     if not slot:
         raise HTTPException(400, "no slot")
@@ -161,7 +171,11 @@ async def terminal_ensure(request: Request, dach_sid: str | None = Cookie(defaul
     code, out = await asyncio.to_thread(
         R.run_as, ["systemctl", "start", unit], None, 20)
     if code != 0:
+        AUDIT.event("terminal_ensure_failed", slot=slot, unit=unit, exit=code,
+                    ip=SEC.client_ip(request, P.CFG), **AUDIT.actor(u))
         raise HTTPException(500, out[-500:])
+    AUDIT.event("terminal_ensure", slot=slot, unit=unit,
+                ip=SEC.client_ip(request, P.CFG), **AUDIT.actor(u))
     return {"slot": slot, "port": P.slot_port(slot)}
 
 
@@ -174,18 +188,24 @@ async def terminal_restart(request: Request, dach_sid: str | None = Cookie(defau
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
     slot = body.get("slot") or u["slot"] or ("root" if u["is_admin"] else None)
     if slot == "root" and not u["is_admin"]:
+        AUDIT.denied(u, "terminal:root")
         raise HTTPException(403, "admin only")
     if not u["is_admin"] and slot != (u["slot"] or ""):
+        AUDIT.denied(u, f"terminal:{slot}")
         raise HTTPException(403, "not yours")
     if not slot:
         raise HTTPException(400, "no slot")
     argv = ["tmux", "-L", f"dach-{slot}", "kill-session", "-t", "main"]
+    # `killed` False is the normal first-attach case (no session yet), so the
+    # tmux output carries nothing worth keeping.
     if slot == "root":
-        code, out = await asyncio.to_thread(R.run_as, argv, None, 20)
+        code, _out = await asyncio.to_thread(R.run_as, argv, None, 20)
     else:
-        code, out = await asyncio.to_thread(R.run_as, argv, slot, 20)
+        code, _out = await asyncio.to_thread(R.run_as, argv, slot, 20)
     killed = code == 0
     # make sure the gateway is up for the reattach
     unit = "dach-ttyd-root.service" if slot == "root" else f"dach-ttyd-{slot}.service"
     await asyncio.to_thread(R.run_as, ["systemctl", "start", unit], None, 20)
+    AUDIT.event("terminal_restart", slot=slot, killed=int(killed),
+                ip=SEC.client_ip(request, P.CFG), **AUDIT.actor(u))
     return {"slot": slot, "port": P.slot_port(slot), "killed": killed}

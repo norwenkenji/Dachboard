@@ -1,0 +1,81 @@
+[project]
+name = "dachboard"
+version = "1.0.0"
+description = "Self-hosted homelab panel: one daemon, one tunnel, per-user rights"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# pytest's numbered tmp dirs land in the system temp dir, which a sandboxed or
+# locked-down account may not be able to create (it cannot even scandir it).
+# Keep them inside the repo so the suite runs anywhere.
+#
+# The starlette/httpx filter is passed as a `-W` flag rather than via the
+# `filterwarnings` key below. That key is applied per test phase, but this
+# warning fires at *import* time of fastapi.testclient (from conftest.py),
+# during collection — before any phase begins. Only a global `-W` is in effect
+# that early. See the note on `filterwarnings` for why it is silenced at all.
+#
+# The message part is deliberately space-free: addopts is split with shlex, so
+# an unquoted space would shatter this into separate argv entries. Fields are
+# `:`-separated (`action:message:category`), and the message is a re.match
+# prefix — "Using." matches the start of starlette's wording, while naming the
+# warning class scopes the filter to starlette alone.
+addopts = "--basetemp=.pytest-tmp -W ignore:Using:starlette.exceptions.StarletteDeprecationWarning"
+tmp_path_retention_policy = "none"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    # starlette 1.6 wants its test client driven by `httpx2` instead of `httpx`.
+    # Migrating is a real decision, not a lint fix: it adds a new package to the
+    # dependency tree, and this is a *test-only* warning with zero effect on the
+    # shipped daemon. Silencing it keeps the suite readable now; the migration
+    # itself is deliberate work for whoever next bumps dependencies.
+    # NB: StarletteDeprecationWarning derives from UserWarning, not
+    # DeprecationWarning, so the generic filter above does not cover it.
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+extend-exclude = [".venv", "deploy/slot-image"]
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9",   # pycodestyle: imports, statements, real errors
+    "F",                # pyflakes
+    "I",                # isort
+    "UP",               # pyupgrade
+    "B",                # bugbear: mutable defaults, blind assert, late binding
+    "C4",               # comprehension gotchas
+    "SIM",              # simplifications
+    "RET",              # return hygiene
+    "RUF",              # ruff-specific
+]
+ignore = [
+    "RET504",           # "assign then return" is clearer for audit rows
+    "SIM108",           # ternaries hurt readability in the rights matrix
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B017"]     # asserting a raised Exception type is the point there
+
+[tool.mypy]
+python_version = "3.10"
+# The daemon only ever runs on Debian/Ubuntu (install.sh, systemd, systemctl,
+# setquota). Without this, mypy type-checks against whatever platform it runs
+# on and reports os.statvfs / getloadavg / uname / pwd.getpwnam as missing
+# attributes on a Windows dev box — false positives that would teach everyone
+# to ignore the output.
+platform = "linux"
+files = ["app"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+# The codebase is fully annotated; these stay off until the routes are typed.
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["yaml", "uvicorn", "fastapi.*", "starlette.*"]
+ignore_missing_imports = true

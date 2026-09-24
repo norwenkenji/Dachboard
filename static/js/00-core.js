@@ -1,5 +1,4 @@
 /* dachboard SPA: 00-core. vanilla JS, no build. Loaded in order, shared globals. */
-/* dachboard SPA. vanilla JS, no build. */
 let CSRF = "", ME = null;
 const $ = (s) => document.querySelector(s);
 let view = $("#view");

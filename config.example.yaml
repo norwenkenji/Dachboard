@@ -8,6 +8,38 @@ session_ttl_hours: 72
 secret_file: /opt/dachboard/.secret
 db_path: /opt/dachboard/data/dachboard.sqlite3
 
+# --- http hardening ---
+# Every response carries a strict CSP, nosniff and frame-ancestors 'none';
+# user files are served as forced downloads. See app/security.py.
+security:
+  hsts: true               # inert over plain HTTP, preloads the upgrade for TLS
+  hsts_max_age: 31536000
+
+# --- login throttle ---
+# The daemon sits behind nginx, which always appears as 127.0.0.1, so the
+# bucket key has to come from X-Forwarded-For. The conf in deploy/nginx/ sets
+# it; forwarded_hops is how many proxies sit in front and append to it.
+#   nginx only                          -> 1
+#   cloudflared/tunnel -> nginx         -> 2
+# Set trust_forwarded_for: false ONLY when the panel is reached directly, with
+# no proxy — otherwise a client could pick its own bucket.
+trust_forwarded_for: true
+forwarded_hops: 1
+
+# --- audit trail ---
+# Security-relevant events (logins, denials, user/slot/token CRUD, systemctl
+# and docker actions, irreversible file deletes, admin cross-slot access) go to
+# the stdlib logger "dachboard.audit", which systemd captures in the journal.
+# A file is written too, if you want a trail that survives the panel's own
+# journal being the thing under investigation. No passwords, tokens or file
+# contents are ever logged.
+audit:
+  file: /opt/dachboard/data/audit.log
+  file_enabled: true
+
+# operational log level for the "dachboard" logger (audit is always INFO)
+log_level: WARNING
+
 # --- uploads ---
 max_upload_mb: 200           # per file via /api/files/upload
 

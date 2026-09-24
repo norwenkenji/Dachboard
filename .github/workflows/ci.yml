@@ -13,6 +13,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: pip install -r requirements.txt
+      # requirements-dev.txt pulls in requirements.txt plus pytest/httpx/ruff/
+      # mypy. Production installs only requirements.txt (deploy/install.sh), so
+      # a deployed venv never carries test tooling.
+      - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
+      # Syntax-check every SPA file: there is no build step and no bundler, so
+      # a stray bracket in one of the 11 numbered scripts is otherwise caught
+      # only in a browser.
       - run: for f in static/js/*.js; do node --check "$f"; done
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      # Both are clean as of now; running them keeps them clean. Without this
+      # gate the next `except Exception: pass` or untyped list lands silently.
+      - run: python -m ruff check .
+      - run: python -m mypy

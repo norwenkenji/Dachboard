@@ -5,25 +5,52 @@ import argparse
 import asyncio
 import getpass
 import json
+import logging
+import os
 import time
 from contextlib import asynccontextmanager, closing
-from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import assets as ASSETS
+from . import audit as AUDIT
 from . import auth as A
 from . import db as D
 from . import deps as P
+from . import files as F
 from . import metrics as M
+from . import security as SEC
 from . import tunnel as T
 from .rbac import RIGHTS
 from .routes import admin, auth, commands, files, overview, tunnel
 
+log = logging.getLogger("dachboard")
+
+
+def _setup_logging(cfg: dict | None = None) -> None:
+    """Give ``dachboard`` a stderr handler once, at WARNING by default.
+
+    systemd routes stderr to the journal, so this is all the panel needs in
+    production. ``logging.basicConfig`` is not used: it would also capture
+    uvicorn's own loggers, whose format is deliberately different.
+    """
+    if log.handlers:
+        return
+    lvl = str((cfg or {}).get("log_level", "WARNING")).upper()
+    log.setLevel(getattr(logging, lvl, logging.WARNING))
+    h = logging.StreamHandler()
+    h.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    log.addHandler(h)
+    log.propagate = False
+
+
 # Backward compat: tests and old imports use app.main.X.
-# CFG / LOGIN_FAILS share the same dict objects with deps;
-# DB / SECRET_FILE / SECRET are rebound in cli(), keep them in sync.
+# These alias the deps module so there is one source of truth — CFG/LOGIN_FAILS
+# share the same objects, while DB/SECRET_FILE/SECRET are rebound in cli() and
+# must be re-pointed there too (the one place a sync can be forgotten).
 CFG = P.CFG
 DB = P.DB
 SECRET_FILE = P.SECRET_FILE
@@ -43,23 +70,34 @@ token_subject = P.token_subject
 check_csrf = P.check_csrf
 home_of = P.home_of
 slot_port = P.slot_port
-_slot_port = P.slot_port
 cmd_row = P.cmd_row
-_cmd_row = P.cmd_row
 UNIT_RE = P.UNIT_RE
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _setup_logging(P.CFG)
     D.init(P.DB)
+    AUDIT.configure(P.CFG)
+    AUDIT.event(AUDIT.BOOT, host=M.host_info().get("hostname"),
+                backend=F.BACKEND, pid=os.getpid())
     P.ensure_setup_token()
     task = asyncio.create_task(_sampler())
+    house = asyncio.create_task(_housekeeping())
     yield
     task.cancel()
+    house.cancel()
 
 
 async def _sampler():
+    """Metrics writer. Errors are logged, not swallowed.
+
+    This used to be ``except Exception: pass``, which meant a permanently broken
+    sampler — a full disk, a schema change, a dead /proc — produced an empty
+    dashboard and no clue why, forever.
+    """
     tick = 0
+    backoff = 0
     while True:
         try:
             s = await asyncio.to_thread(M.snapshot)
@@ -74,6 +112,7 @@ async def _sampler():
                      s["load"][0]))
                 con.commit()
             D.prune_metrics(P.DB)
+            backoff = 0
             tick += 1
             if tick % 10 == 0:
                 t = P.CFG.get("tunnel", {})
@@ -82,10 +121,31 @@ async def _sampler():
                         T.current, t.get("provider", ""), t.get("args", []),
                         int(t.get("cache_seconds", 30)), t.get("cache_file"))
                 except Exception:
-                    pass
+                    # A tunnel probe failing is routine (no provider configured,
+                    # container absent) — but it should still be visible once.
+                    log.exception("tunnel probe failed")
         except Exception:
-            pass
-        await asyncio.sleep(30)
+            log.exception("metrics sample failed")
+            # Repeated failures must not spin at 30s intervals forever.
+            backoff = min(backoff + 30, 600) if backoff else 30
+        await asyncio.sleep(30 + backoff)
+
+
+async def _housekeeping():
+    """Periodic cleanup the request path should not pay for.
+
+    Expired sessions are never deleted on logout-or-expiry otherwise, and every
+    authenticated request writes to that table (the sliding TTL), so an
+    ever-growing `sessions` slows the hot path.
+    """
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            n = await asyncio.to_thread(D.prune_sessions, P.DB)
+            if n:
+                AUDIT.event("sessions_pruned", count=n)
+        except Exception:
+            log.exception("session GC failed")
 
 
 app = FastAPI(title="dachboard", lifespan=lifespan)
@@ -102,6 +162,32 @@ async def current_request(request, call_next):
         P.CURRENT_REQUEST.reset(tok)
 
 
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Harden every response.
+
+    Registered after ``current_request`` so it wraps it — headers land on the
+    response that actually leaves the app. Values an endpoint set itself win:
+    ``setdefault`` keeps the file preview's own CSP and ``SAMEORIGIN`` framing.
+    """
+    response = await call_next(request)
+    sec = P.CFG.get("security", {}) or {}
+    for k, v in SEC.security_headers(
+            hsts=bool(sec.get("hsts", True)),
+            hsts_max_age=int(sec.get("hsts_max_age", 31536000))).items():
+        response.headers.setdefault(k, v)
+    # Versioned static assets are cache-busted by a content hash in ?v= (see
+    # app/assets.py), so a changed file means a changed URL and they may be
+    # cached — bounded, because the hash covers the file, not the shell that
+    # points at it. Everything else (the SPA shell, APIs, user bytes) is never
+    # stored: a cached shell would keep pointing at old asset URLs.
+    if request.url.path.startswith(("/static/", "/mcp/")):
+        response.headers.setdefault("Cache-Control", "public, max-age=86400")
+    else:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=str(P.ROOT / "static")), name="static")
 if (P.ROOT / "mcp").is_dir():
     # MCP stdio server script — public download for the API tab
@@ -113,10 +199,18 @@ app.include_router(commands.router)
 app.include_router(tunnel.router)
 app.include_router(admin.router)
 
+_shell = ASSETS.ShellRenderer(P.ROOT)
+
 
 @app.get("/")
 def index():
-    return FileResponse(str(P.ROOT / "static" / "index.html"))
+    """The SPA shell, with every asset URL versioned by content hash.
+
+    Rendered rather than sent as a file, so a ``?v=`` bump is never something a
+    human has to remember. The renderer caches by mtime, so this costs one
+    string substitution in steady state, not eleven hashes per request.
+    """
+    return HTMLResponse(_shell.render())
 
 
 def cli():
@@ -136,6 +230,7 @@ def cli():
         SECRET_FILE = P.SECRET_FILE
         P.SECRET = secret()
         SECRET = P.SECRET
+    _setup_logging(P.CFG)
     D.init(P.DB)
     if a.cmd == "create-admin":
         login = input("admin login [admin]: ").strip() or "admin"
@@ -149,7 +244,7 @@ def cli():
                 "INSERT INTO users(login,pass_hash,is_admin,rights,limits,created_at)"
                 " VALUES(?,?,?,?,?,?)",
                 (login, A.hash_password(pw), 1,
-                 json.dumps({r: True for r in RIGHTS}), "{}", int(time.time())))
+                 json.dumps(dict.fromkeys(RIGHTS, True)), "{}", int(time.time())))
             con.commit()
         print(f"admin {login} created")
     elif a.cmd == "rotate-password":

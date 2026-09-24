@@ -217,11 +217,15 @@ def t_whoami(_a: dict) -> dict:
 TOOLS = [
     ("dach_overview", t_overview, "Host vitals: CPU, memory, disk, temps, load",
      {}),
-    ("dach_services", t_services, "List systemd units", {}),
-    ("dach_service_logs", t_service_logs, "Read a unit's journal",
+    ("dach_services", t_services,
+     "List systemd units (admin tokens only)", {}),
+    ("dach_service_logs", t_service_logs,
+     "Read a unit's journal (admin tokens only)",
      {"name": {"type": "string", "description": "unit name, e.g. nginx.service"},
       "tail": {"type": "integer", "description": "last N lines, default 200"}}),
-    ("dach_service_action", t_service_action, "Start/stop/restart a systemd unit",
+    ("dach_service_action", t_service_action,
+     "Start/stop/restart a systemd unit — runs as root on the host "
+     "(admin tokens only)",
      {"name": {"type": "string"}, "action": {"type": "string",
       "enum": ["start", "stop", "restart"]}}),
     ("dach_containers", t_containers, "List docker containers", {}),
@@ -287,7 +291,9 @@ def handle(msg: dict) -> dict | None:
         return {"jsonrpc": "2.0", "id": ident, "result": {}}
     if m == "tools/list":
         out = []
-        for name, fn, desc, props in TOOLS:
+        # `fn` is deliberately unused here: the listing describes tools, and the
+        # handler is only needed by tools/call.
+        for name, _fn, desc, props in TOOLS:
             schema = {"type": "object", "properties": props}
             schema["required"] = [k for k in props
                                   if k in ("name", "path", "local_path", "argv",

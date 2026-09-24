@@ -1,7 +1,12 @@
-fastapi>=0.110
-uvicorn>=0.29
-pyyaml>=6
-python-multipart>=0.0.9
-# tests only:
-pytest>=8
-httpx>=0.27
+# Runtime dependencies for the panel daemon.
+# Pinned to a known-good floor with an upper bound: an unbounded ">=fastapi"
+# silently installs whatever is newest at upgrade time, so `git pull &&
+# install.sh` on a production server can pick up a breaking release that was
+# never tested against this code.
+fastapi>=0.110,<1.0
+uvicorn>=0.29,<1.0
+pyyaml>=6,<7
+python-multipart>=0.0.9,<0.1
+
+# Test/lint dependencies live in requirements-dev.txt and are NOT installed by
+# deploy/install.sh — a production venv should not carry pytest.

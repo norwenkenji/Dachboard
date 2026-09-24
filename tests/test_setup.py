@@ -3,9 +3,10 @@ from conftest import login
 
 
 def test_setup_flow(clients, env, tmp_path):
+    from contextlib import closing
+
     import app.main as main
     from app import db as D
-    from contextlib import closing
     # wipe admins to trigger setup mode
     with closing(D.connect(main.DB)) as con:
         con.execute("DELETE FROM users WHERE is_admin=1")

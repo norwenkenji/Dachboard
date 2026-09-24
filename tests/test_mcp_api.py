@@ -1,11 +1,10 @@
 import json
+import pathlib
 import zipfile
 from contextlib import closing
 
 import pytest
-from conftest import login
 
-import app.main as main
 from app import auth as A
 from app import db as D
 from app import deps as P
@@ -59,7 +58,8 @@ def test_bearer_files_scoped_to_slot_home(env, clients):
                json={"path": "from-mcp.txt", "content": "hi"})
     assert r.status_code == 200, r.text
     home = env["homes"]["bob"]
-    assert (home_cmp := __import__("pathlib").Path(home) / "from-mcp.txt").read_text() == "hi"
+    written = pathlib.Path(home) / "from-mcp.txt"
+    assert written.read_text() == "hi"
     r = c.post("/api/files/write", headers=bearer(tok),
                json={"path": "../admin-secret", "content": "x"})
     assert r.status_code == 400  # escape blocked
@@ -83,7 +83,6 @@ def test_bearer_bad_token(env, clients):
 
 
 def test_unzip_zip_slip_blocked(env, clients):
-    from app import files as F
     import pathlib
     home = pathlib.Path(env["homes"]["bob"])
     zpath = home / "evil.zip"
@@ -115,7 +114,6 @@ def test_unzip_ok(env, clients):
 
 
 def test_unzip_symlink_member_blocked(env, clients):
-    import io
     import pathlib
     import zipfile as zf
     home = pathlib.Path(env["homes"]["bob"])

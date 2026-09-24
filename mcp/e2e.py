@@ -5,7 +5,23 @@ import os
 import subprocess
 
 BASE = os.environ.get("DACH_URL", "http://127.0.0.1:8420")
-TOKEN = os.environ.get("DACH_TOKEN") or open("/home/zxc/.mcp-test-tok").read().strip()
+
+
+def _token() -> str:
+    """DACH_TOKEN wins; otherwise read the test token off disk.
+
+    A context manager, not `open(...).read()` inline at module level: the bare
+    form leaks the descriptor for the life of the process, which for a short
+    script is harmless but is exactly the habit that bites in a long-lived one.
+    """
+    tok = os.environ.get("DACH_TOKEN")
+    if tok:
+        return tok
+    with open("/home/zxc/.mcp-test-tok") as f:
+        return f.read().strip()
+
+
+TOKEN = _token()
 
 lines = [
     {"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -36,7 +52,7 @@ proc = subprocess.run(
     env={"DACH_URL": BASE, "DACH_TOKEN": TOKEN, "PATH": "/usr/bin:/bin"})
 if proc.returncode != 0:
     print("mcp stderr:", proc.stderr[-800:])
-out = [json.loads(l) for l in proc.stdout.strip().splitlines() if l.strip()]
+out = [json.loads(ln) for ln in proc.stdout.strip().splitlines() if ln.strip()]
 byid = {o.get("id"): o for o in out}
 tools = byid[2]["result"]["tools"]
 print("tools:", len(tools), [t["name"] for t in tools][:6], "...")

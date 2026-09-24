@@ -1,14 +1,12 @@
 """Dynamic slot provisioning: app/provision.py is the single code path shared
 by the web UI (POST /api/slots, /api/users with a slot) and the Telegram bot's
 root helper. These pin the guards and the registry math."""
-import json
 from contextlib import closing
 
 import pytest
 
 from app import db as D
 from app import provision as PR
-
 
 # ---------- name rules ----------
 

@@ -1,13 +1,16 @@
 import json
 import secrets
 import time
-from contextlib import closing
-from fastapi import APIRouter, Cookie, Request, Response
+from contextlib import closing, suppress
+
+from fastapi import APIRouter, Cookie, HTTPException, Request, Response
+
+from .. import audit as AUDIT
 from .. import auth as A
 from .. import db as D
 from .. import deps as P
+from .. import security as SEC
 from ..rbac import RIGHTS, can
-from fastapi import HTTPException
 
 router = APIRouter()
 # ---------- auth ----------
@@ -29,7 +32,10 @@ async def setup(request: Request):
     except OSError:
         want = ""
     got = str(body.get("token", ""))
+    ip = SEC.client_ip(request, P.CFG)
     if not want or not secrets.compare_digest(got, want):
+        # Someone is guessing at the bootstrap token from the network.
+        AUDIT.event("setup_denied", ip=ip)
         raise HTTPException(403, "bad token")
     login = str(body.get("login", "")).strip()
     password = str(body.get("password", ""))
@@ -40,30 +46,34 @@ async def setup(request: Request):
             "INSERT INTO users(login,pass_hash,is_admin,rights,limits,created_at)"
             " VALUES(?,?,?,?,?,?)",
             (login, A.hash_password(password), 1,
-             json.dumps({r: True for r in RIGHTS}), "{}", int(time.time())))
+             json.dumps(dict.fromkeys(RIGHTS, True)), "{}", int(time.time())))
         con.commit()
-    try:
+    with suppress(OSError):
         p.unlink()
-    except OSError:
-        pass
+    AUDIT.event("setup", actor=login, ip=ip)
     return {"ok": True}
 
 
 @router.post("/api/login")
 async def login(request: Request, response: Response):
     body = await request.json()
-    ip = request.client.host if request.client else "?"
-    fails = [t for t in P.LOGIN_FAILS.get(ip, []) if time.time() - t < 600]
-    if len(fails) >= 10:
+    # Behind nginx the socket peer is always the proxy, so the bucket key has to
+    # come from the forwarded chain — otherwise every visitor shares one bucket
+    # and ten stray failures lock the whole panel out for ten minutes.
+    ip = SEC.client_ip(request, P.CFG)
+    login_name = str(body.get("login", ""))
+    if P.login_blocked(ip):
+        AUDIT.event("login_throttled", ip=ip, attempted=login_name)
         raise HTTPException(429, "slow down")
-    u = P.get_user_by_login(str(body.get("login", "")))
+    u = P.get_user_by_login(login_name)
     if not u or not A.verify_password(str(body.get("password", "")), u["pass_hash"]):
-        fails.append(time.time())
-        P.LOGIN_FAILS[ip] = fails
+        n = P.note_login_failure(ip)
+        AUDIT.event("login_failed", ip=ip, attempted=login_name, fails=n)
         raise HTTPException(401, "bad credentials")
     if u.get("must_change_pw"):
+        AUDIT.event("login_must_change_pw", ip=ip, **AUDIT.actor(u))
         raise HTTPException(401, {"must_change": True})
-    P.LOGIN_FAILS.pop(ip, None)
+    P.clear_login_failures(ip)
     tok, csrf = A.new_token(), A.new_token(16)
     ttl = int(P.CFG.get("session_ttl_hours", 72)) * 3600
     with closing(D.connect(P.DB)) as con:
@@ -74,6 +84,7 @@ async def login(request: Request, response: Response):
     response.set_cookie(P.COOKIE, tok, httponly=True,
                         secure=bool(P.CFG.get("cookie_secure", True)),
                         samesite="lax", path="/", max_age=ttl)
+    AUDIT.event("login", ip=ip, **AUDIT.actor(u))
     return {"csrf": csrf, "user": {k: v for k, v in u.items() if k != "pass_hash"}}
 
 
@@ -81,11 +92,13 @@ async def login(request: Request, response: Response):
 async def logout(request: Request, response: Response,
                  dach_sid: str | None = Cookie(default=None)):
     P.check_csrf(request, dach_sid)
+    u = await P.session_user(dach_sid)
     if dach_sid:
         with closing(D.connect(P.DB)) as con:
             con.execute("DELETE FROM sessions WHERE token=?", (dach_sid,))
             con.commit()
     response.delete_cookie(P.COOKIE, path="/")
+    AUDIT.event("logout", ip=SEC.client_ip(request, P.CFG), **AUDIT.actor(u))
     return {"ok": True}
 
 
@@ -122,6 +135,8 @@ async def me_password(request: Request, dach_sid: str | None = Cookie(default=No
     with closing(D.connect(P.DB)) as con:
         r = con.execute("SELECT pass_hash FROM users WHERE id=?", (u["id"],)).fetchone()
         if not r or not A.verify_password(str(body.get("old_password", "")), r["pass_hash"]):
+            AUDIT.event("password_change_denied",
+                        ip=SEC.client_ip(request, P.CFG), **AUDIT.actor(u))
             raise HTTPException(401, "bad old password")
         new = str(body.get("new_password", ""))
         if len(new) < 8:
@@ -129,6 +144,8 @@ async def me_password(request: Request, dach_sid: str | None = Cookie(default=No
         con.execute("UPDATE users SET pass_hash=?, must_change_pw=0 WHERE id=?",
                     (A.hash_password(new), u["id"]))
         con.commit()
+    AUDIT.event("password_change", ip=SEC.client_ip(request, P.CFG),
+                **AUDIT.actor(u))
     return {"ok": True}
 
 
@@ -136,14 +153,14 @@ async def me_password(request: Request, dach_sid: str | None = Cookie(default=No
 async def first_password(request: Request):
     """Pre-registered user sets their own password on first login. No session."""
     body = await request.json()
-    ip = request.client.host if request.client else "?"
-    u = P.get_user_by_login(str(body.get("login", "")))
+    ip = SEC.client_ip(request, P.CFG)
+    login_name = str(body.get("login", ""))
+    u = P.get_user_by_login(login_name)
     new = str(body.get("new_password", ""))
     if (not u or not u.get("must_change_pw")
             or not A.verify_password(str(body.get("old_password", "")), u["pass_hash"])):
-        fails = [t for t in P.LOGIN_FAILS.get(ip, []) if time.time() - t < 600]
-        fails.append(time.time())
-        P.LOGIN_FAILS[ip] = fails
+        n = P.note_login_failure(ip)
+        AUDIT.event("first_password_denied", ip=ip, attempted=login_name, fails=n)
         raise HTTPException(401, "bad credentials")
     if len(new) < 8:
         raise HTTPException(400, "password min 8")
@@ -151,6 +168,7 @@ async def first_password(request: Request):
         con.execute("UPDATE users SET pass_hash=?, must_change_pw=0 WHERE id=?",
                     (A.hash_password(new), u["id"]))
         con.commit()
+    AUDIT.event("first_password", ip=ip, **AUDIT.actor(u))
     return {"ok": True}
 
 
@@ -166,8 +184,13 @@ async def auth_check(request: Request, target: str = "", slot: str = "",
         return Response(status_code=401)
     if target == "term":
         if not can(u, "terminal"):
+            AUDIT.denied(u, "terminal", SEC.client_ip(request, P.CFG))
             return Response(status_code=403)
         if not u["is_admin"] and slot and slot != (u["slot"] or ""):
+            # A terminal is a root-adjacent surface: probing for someone else's
+            # slot is exactly what an audit trail needs to show.
+            AUDIT.event("terminal_foreign_slot_denied", want=slot,
+                        ip=SEC.client_ip(request, P.CFG), **AUDIT.actor(u))
             return Response(status_code=403)
     return Response(status_code=204)
 

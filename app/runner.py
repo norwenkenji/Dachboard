@@ -6,8 +6,8 @@ import subprocess
 
 try:
     import pwd
-except ImportError:  # Windows: no user db
-    pwd = None
+except ImportError:  # Windows dev box: no user db. The daemon runs on Linux.
+    pwd = None  # type: ignore[assignment]
 
 MAX_OUTPUT = 64 * 1024
 
@@ -50,10 +50,10 @@ def run_as(argv: list[str], run_as: str | None = None,
             scope.append(f"-pCPUQuota={cpu_quota}")
         if mem_max:
             scope.append(f"-pMemoryMax={mem_max}")
-        scope += ["--"] + cmd
+        scope += ["--", *cmd]
         cmd = scope
     elif run_as and shutil.which("runuser"):
-        cmd = ["runuser", "-u", run_as, "--"] + cmd
+        cmd = ["runuser", "-u", run_as, "--", *cmd]
     return _run(cmd, timeout)
 
 
@@ -67,4 +67,4 @@ def exec_in(slot: str, argv: list[str], timeout: int = 60) -> tuple[int, str]:
         name = S.container_name(slot)
     except ValueError as e:
         return 1, str(e)
-    return _run(["docker", "exec", name] + list(argv), timeout)
+    return _run(["docker", "exec", name, *argv], timeout)
