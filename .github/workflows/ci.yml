@@ -1,6 +1,11 @@
 name: ci
 on:
   push:
+    # Restricted to the default branch on purpose. Dependabot pushes its
+    # branches into this same repository, and an unfiltered `push` trigger makes
+    # every Dependabot PR run the whole 11-job matrix twice — once for the branch
+    # push, once for the pull_request. Same for any feature branch.
+    branches: [main]
   pull_request:
 
 # Every action is pinned to a full commit SHA rather than a mutable tag. A tag
