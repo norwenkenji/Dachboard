@@ -1,0 +1,57 @@
+# Dependabot exists here because the CI actions are SHA-pinned, and a pin nobody
+# moves is worse than a mutable tag: it freezes the build on code that no longer
+# receives security fixes, silently. Pinning stops a tag being re-pointed under a
+# green build; this file is the other half of that bargain — it proposes the move
+# as a reviewed PR, with CI proving it before merge.
+#
+# Grouped so a routine week is one PR per ecosystem rather than five. Security
+# updates are not grouped and arrive on their own, immediately.
+
+version: 2
+updates:
+  # The SHA pins in .github/workflows/ci.yml. Dependabot reads the `# vX.Y.Z`
+  # comment beside each `uses:` and rewrites it together with the SHA, so those
+  # comments are load-bearing — do not delete them as "redundant".
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["ci", "dependencies"]
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # requirements.txt is runtime (installed by deploy/install.sh) and
+  # requirements-dev.txt is CI/test tooling. Both carry deliberate upper bounds,
+  # so a major bump shows up as a PR a human accepts rather than as a surprise
+  # breaking release landing on the next `git pull && install.sh`.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["python", "dependencies"]
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      python:
+        patterns: ["*"]
+
+  # The blessed slot image. Not wired into anything app/ reads today (see
+  # docs/SLOTS.md — slots are plain Linux users, not containers), but it is a
+  # mutable `FROM ubuntu:22.04` in the tree, so it is tracked rather than left
+  # to rot until someone enables slots v2 and inherits a stale base.
+  - package-ecosystem: docker
+    directory: "/deploy/slot-image"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["docker", "dependencies"]
+    commit-message:
+      prefix: deps
+      include: scope

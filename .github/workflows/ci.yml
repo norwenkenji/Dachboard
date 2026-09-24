@@ -2,28 +2,45 @@ name: ci
 on:
   push:
   pull_request:
+
+# Every action is pinned to a full commit SHA rather than a mutable tag. A tag
+# can be re-pointed at different code without this file changing, so `@v7` would
+# let the contents of a green build change underneath it — unacceptable in a
+# panel whose whole job is handing out root. Dependabot
+# (.github/dependabot.yml) watches the github-actions ecosystem and opens a PR
+# that moves the SHA and rewrites the `# vX.Y.Z` comment next to it together.
+# Do not "tidy" those comments: Dependabot uses them to tell you what a SHA is.
+
 jobs:
   test:
-    # Pinned labels, not `ubuntu-latest`. GitHub migrates `-latest` from 24.04 to
-    # 26.04 starting 2026-10-19, and a silent base-image swap under a security
-    # project is exactly the kind of change that should arrive in a reviewed
-    # commit instead of mid-week. 26.04 runs in the matrix now, so the migration
-    # is proven before it is forced; collapse this to a single label once
-    # `-latest` has moved and 24.04 stops being the default.
+    # Pinned labels, not `ubuntu-latest`. GitHub migrates `-latest` from 24.04
+    # to 26.04 starting 2026-10-19, and a silent base-image swap under a
+    # security project should arrive in a reviewed commit instead of mid-week.
+    # 26.04 runs in the matrix now, so the migration is proven before it is
+    # forced; collapse the os axis once `-latest` has moved.
+    #
+    # The Python axis is the runtime counterpart of `requires-python = ">=3.10"`.
+    # ruff (target-version = py310) and mypy (python_version = "3.10") already
+    # reject *syntax and APIs* newer than the floor, but only executing the suite
+    # catches behaviour that changed underneath us — deprecations turning into
+    # errors, and stdlib shifts in sqlite3/zipfile/os that a 3.12-only run would
+    # never see. Oldest and newest are where that bites, so both are here.
+    name: test (py${{ matrix.python }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      # Report every broken combination. With fail-fast the first failure cancels
+      # the rest, which hides whether a problem is one version or all of them.
       fail-fast: false
       matrix:
+        # Quoted on purpose: YAML would read a bare 3.10 as the float 3.1.
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         os: [ubuntu-24.04, ubuntu-26.04]
     steps:
-      # v5+ of these actions run on Node 24. v4 targeted the deprecated Node 20,
-      # which the runner only kept working by force-running it on 24 and
-      # annotating every build about it.
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          python-version: "3.12"
-      - uses: actions/setup-node@v7
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: "22"
       # requirements-dev.txt pulls in requirements.txt plus pytest/httpx/ruff/
@@ -37,12 +54,13 @@ jobs:
       - run: for f in static/js/*.js; do node --check "$f"; done
 
   lint:
-    # One label is enough here: ruff and mypy are not OS-sensitive (mypy is
-    # pinned to platform=linux in pyproject.toml regardless of the runner).
+    # One label and one interpreter: ruff and mypy are not OS-sensitive, and
+    # both check against the *configured* target (py310 / python_version=3.10)
+    # rather than the interpreter they happen to run on.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
