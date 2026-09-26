@@ -114,6 +114,36 @@ python tests/smoke_server.py
 It is deliberately not collected by pytest (it spawns a process and binds a
 port) and exits non-zero, listing every failed check.
 
+## CI and branch protection
+
+`.github/workflows/ci.yml` runs the suite across **Python 3.10–3.14 on both
+ubuntu-24.04 and ubuntu-26.04** (10 combinations, `fail-fast: false`) plus a
+lint job with ruff and mypy. The matrix is the runtime counterpart of
+`requires-python = ">=3.10"`: ruff (`target-version = "py310"`) and mypy
+(`python_version = "3.10"`) reject syntax and APIs newer than the floor, but only
+executing the tests catches a deprecation that became an error or a stdlib
+behaviour shift. All ten legs must report the same counts — a leg that silently
+skips is not a green build.
+
+Runner labels are pinned rather than `ubuntu-latest`, because GitHub migrates
+`-latest` (24.04 → 26.04 from 2026-10-19) and a base-image swap under a panel
+that hands out root should arrive as a reviewed commit, not mid-week.
+
+Every action is pinned to a **full commit SHA**, not a mutable tag — a tag can be
+re-pointed at different code without this repository changing. Dependabot
+(`.github/dependabot.yml`) is what keeps those pins from rotting: it proposes
+moves as reviewed PRs across the `github-actions`, `pip` and `docker` ecosystems.
+The `# vX.Y.Z` comments beside each SHA are load-bearing, since Dependabot reads
+and rewrites them — do not delete them as redundant.
+
+`main` is protected against **force pushes and deletion**, enforced for
+administrators too. Required status checks and required pull-request reviews are
+deliberately *off*: they would block the direct-push workflow, since GitHub
+refuses to push commits whose required checks cannot have run yet. If you move to
+a PR-based flow, turn on `required_status_checks` with the `test` and `lint`
+contexts at the same time as `required_pull_request_reviews`, or the branch will
+reject ordinary pushes.
+
 ## Tunnel providers
 
 `config.yaml → tunnel.provider` is any executable. Its stdout is scanned for the
