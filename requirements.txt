@@ -3,10 +3,10 @@
 # silently installs whatever is newest at upgrade time, so `git pull &&
 # install.sh` on a production server can pick up a breaking release that was
 # never tested against this code.
-fastapi>=0.110,<1.0
-uvicorn>=0.29,<1.0
-pyyaml>=6,<7
-python-multipart>=0.0.9,<0.1
+fastapi>=0.141.1,<1.0
+uvicorn>=0.53.0,<1.0
+pyyaml>=6.0.3,<7
+python-multipart>=0.0.32,<0.1
 
 # Test/lint dependencies live in requirements-dev.txt and are NOT installed by
 # deploy/install.sh — a production venv should not carry pytest.
