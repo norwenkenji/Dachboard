@@ -1,0 +1,42 @@
+# The slot image is built by hand on the server (see the Dockerfile header), so
+# ci.yml never compiles it. That made Dependabot's base-image bumps unverifiable:
+# the whole matrix went green while proving nothing about this one file, and a
+# jump like ubuntu 22.04 -> 26.04 can silently drop a package (podman,
+# fuse-overlayfs, slirp4netns, docker.io all move at their own pace).
+#
+# This job closes that gap. It is path-filtered because pulling ubuntu plus this
+# apt set costs minutes, and the file changes rarely.
+name: slot-image
+
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/slot-image/**", ".github/workflows/slot-image.yml"]
+  pull_request:
+    paths: ["deploy/slot-image/**", ".github/workflows/slot-image.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: docker build (slot image)
+    runs-on: ubuntu-24.04
+    steps:
+      # Pinned to a full commit SHA, not a mutable tag: a tag can be re-pointed
+      # at different code without this repository changing. Dependabot moves
+      # these; the "# vX.Y.Z" comment beside each one is what it rewrites, so do
+      # not delete those comments as redundant.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Build the slot image
+        run: docker build -t dach-slot:ci deploy/slot-image/
+
+      # A successful build only proves apt exited 0. This checks the image
+      # actually contains what a slot needs, so a package that was renamed or
+      # dropped in a future base release fails here instead of at slot startup.
+      - name: Verify the image contents
+        run: |
+          docker run --rm --entrypoint /bin/bash dach-slot:ci -c 'set -e; command -v bash; command -v curl; command -v python3; command -v psql; command -v podman; command -v docker; command -v fuse-overlayfs; command -v newuidmap; command -v slirp4netns; python3 -c "import venv, ssl, sqlite3"; podman --version; grep -q fuse-overlayfs /etc/containers/storage.conf; test -d /opt/shared; echo IMAGE-OK'
+
+      - name: Report the base image actually used
+        run: |
+          docker run --rm --entrypoint /bin/bash dach-slot:ci -c 'grep -E "^(PRETTY_NAME|VERSION_ID)=" /etc/os-release'
