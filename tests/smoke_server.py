@@ -4,9 +4,10 @@ The pytest suite drives the app through TestClient, which never proves that
 `python -m app.main serve` — the actual systemd ExecStart — boots, binds, and
 answers over a real socket. This does, and walks the security chain end to end:
 
-  setup token -> create admin -> login -> upload evil.html ->
-  download it (must be inert) -> preview it (must be refused) ->
-  non-admin hits /api/services (must be 403) -> audit lines on disk
+  setup token -> create admin -> login -> create a slot user ->
+  upload evil.html into that slot's home -> download it (must be inert) ->
+  preview it (must be refused) -> the slot user hits /api/services (must be
+  403) -> audit lines on disk -> login throttle
 
 Deliberately NOT named `test_*.py`: it spawns a server process and binds a
 real port, which is not something the default `pytest -q` run should do. Run it
@@ -17,10 +18,18 @@ by hand before deploying, or after touching headers/auth/file delivery:
 
 Exits non-zero and lists every failed check; the temp dir (config, db, server
 log, audit log) is kept and printed so a failure can be inspected.
+
+Some sections need a real `/home/<slot>` directory, which `home_of()` hardcodes
+and no config knob overrides. Where that cannot be created the section is
+reported as SKIPPED and the exit status is non-zero, so a partial run can never
+be mistaken for a green one; `tests/test_file_delivery.py` covers the same
+chain on every platform.
 """
+import contextlib
 import http.cookiejar
 import json
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -33,12 +42,24 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 FAILS = []
+SKIPS = []
 
 
 def check(label, cond, detail=""):
     print(("  PASS  " if cond else "  FAIL  ") + label + (f"   {detail}" if detail else ""))
     if not cond:
         FAILS.append(label)
+
+
+def skip(label, reason):
+    """Record a section that could not run at all.
+
+    A skip is not a pass: the verdict below refuses to print SMOKE PASS while
+    SKIPS is non-empty, because a security gate that quietly dropped its most
+    important section is worse than one that failed loudly.
+    """
+    print(f"  SKIP  {label}   {reason}")
+    SKIPS.append(f"{label}: {reason}")
 
 
 def free_port():
@@ -102,11 +123,11 @@ def main():
     opener = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(jar))
 
-    def req(method, path, data=None, headers=None, raw=False):
+    def req(method, path, data=None, headers=None, raw=False, op=None):
         r = urllib.request.Request(base + path, data=data, method=method,
                                    headers=headers or {})
         try:
-            with opener.open(r, timeout=20) as resp:
+            with (op or opener).open(r, timeout=20) as resp:
                 body = resp.read()
                 return resp.status, _hdrs(resp), (body if raw else
                                                   body.decode("utf-8", "replace"))
@@ -114,6 +135,12 @@ def main():
             body = e.read()
             return e.code, _hdrs(e), (body if raw else
                                       body.decode("utf-8", "replace"))
+
+    # Bound before the try so the finally can always clean the slot home up,
+    # even when a section raised on the way to creating it.
+    slot_home = None
+    created_home = False
+    created_home_parent = False
 
     try:
         # ---- wait for the socket ----
@@ -135,7 +162,7 @@ def main():
         print(f"[smoke] server up (pid {proc.pid})\n")
 
         # ---- 1. the SPA shell ----
-        print("[1] GET / — shell, asset versions, hardening headers")
+        print("[1] GET / - shell, asset versions, hardening headers")
         st, hd, body = req("GET", "/")
         check("status 200", st == 200, str(st))
         check("shell has no hand-maintained ?v=23", "?v=23" not in body)
@@ -189,37 +216,12 @@ def main():
         csrf = json.loads(b4).get("csrf") if st4 == 200 else None
         check("csrf token returned", bool(csrf))
 
-        # ---- 5. the stored-XSS chain ----
-        print("\n[5] upload evil.html, then try to make it execute")
-        evil = b"<html><body><script>fetch('/api/csrf').then(r=>r.text())" \
-               b"</script>pwn</body></html>"
-        payload, ctype = multipart({}, "evil.html", evil)
-        st5, _, b5 = req("POST", "/api/files/upload", data=payload,
-                         headers={"Content-Type": ctype, "X-CSRF-Token": csrf or ""})
-        check("upload 200", st5 == 200, f"{st5} {b5[:120]}")
-
-        st6, hd6, b6 = req("GET", "/api/files/download?path=evil.html", raw=True)
-        check("download 200", st6 == 200, str(st6))
-        check("Content-Type forced to octet-stream",
-              hd6.get("content-type") == "application/octet-stream",
-              str(hd6.get("content-type")))
-        cd = hd6.get("content-disposition") or ""
-        check("Content-Disposition: attachment", cd.startswith("attachment"), cd)
-        check("filename preserved", 'evil.html' in cd, cd)
-        check("download CSP cannot run anything",
-              "default-src 'none'" in (hd6.get("content-security-policy") or "")
-              and "sandbox" in (hd6.get("content-security-policy") or ""),
-              str(hd6.get("content-security-policy")))
-        check("bytes intact (so it still downloads usefully)", b6 == evil)
-
-        st7, _hd7, _b7 = req("GET", "/api/files/preview?path=evil.html")
-        check("preview of active content refused with 415", st7 == 415, str(st7))
-
-        st8, _b8h, _b8 = req("GET", "/api/files/download?path=../.secret", raw=True)
-        check("path escape refused", st8 in (400, 403, 404), str(st8))
-
-        # ---- 6. RBAC: non-admin must not reach systemctl ----
-        print("\n[6] non-admin token/session vs /api/services")
+        # ---- 5. the stored-XSS chain, as a slot user ----
+        # Never as admin: home_of() gives an admin "/", the filesystem root, so
+        # an admin upload writes /evil.html — which succeeds and litters / on a
+        # server running as root, and lands on C:\ under Windows. A slot owner
+        # is also the realistic actor for hostile markup.
+        print("\n[5] slot user + upload evil.html, then try to make it execute")
         dbp = tmp / "d.sqlite3"
         con = sqlite3.connect(str(dbp))
         con.execute("PRAGMA busy_timeout=5000")
@@ -241,21 +243,60 @@ def main():
             urllib.request.HTTPCookieProcessor(jar2))
 
         def req2(method, path, data=None, headers=None):
-            r = urllib.request.Request(base + path, data=data, method=method,
-                                       headers=headers or {})
-            try:
-                with op2.open(r, timeout=20) as resp:
-                    return resp.status, resp.read().decode("utf-8", "replace")
-            except urllib.error.HTTPError as e:
-                return e.code, e.read().decode("utf-8", "replace")
+            st, _hd, bd = req(method, path, data=data, headers=headers, op=op2)
+            return st, bd
 
         stb, bb = req2("POST", "/api/login",
                        data=json.dumps({"login": "smokebob",
                                         "password": "bobpass123"}).encode(),
                        headers={"Content-Type": "application/json"})
-        check("non-admin login 200", stb == 200, f"{stb} {bb[:120]}")
+        check("slot user login 200", stb == 200, f"{stb} {bb[:120]}")
         csrfb = json.loads(bb).get("csrf") if stb == 200 else ""
 
+        # home_of() hardcodes /home/<slot> and no config knob overrides it, so
+        # the delivery chain needs a real directory there.
+        slot_home = Path("/home/smokebob")
+        try:
+            created_home_parent = not slot_home.parent.exists()
+            slot_home.mkdir(parents=True, exist_ok=True)
+            created_home = True
+        except OSError as e:
+            skip("file delivery chain",
+                 f"cannot create {slot_home}: {e.__class__.__name__}: {e}")
+
+        if created_home:
+            evil = b"<html><body><script>fetch('/api/csrf').then(r=>r.text())" \
+                   b"</script>pwn</body></html>"
+            payload, ctype = multipart({}, "evil.html", evil)
+            st5, _h5, b5 = req("POST", "/api/files/upload", data=payload,
+                               headers={"Content-Type": ctype,
+                                        "X-CSRF-Token": csrfb or ""}, op=op2)
+            check("upload 200", st5 == 200, f"{st5} {b5[:120]}")
+
+            st6, hd6, b6 = req("GET", "/api/files/download?path=evil.html",
+                               raw=True, op=op2)
+            check("download 200", st6 == 200, str(st6))
+            check("Content-Type forced to octet-stream",
+                  hd6.get("content-type") == "application/octet-stream",
+                  str(hd6.get("content-type")))
+            cd = hd6.get("content-disposition") or ""
+            check("Content-Disposition: attachment", cd.startswith("attachment"), cd)
+            check("filename preserved", 'evil.html' in cd, cd)
+            check("download CSP cannot run anything",
+                  "default-src 'none'" in (hd6.get("content-security-policy") or "")
+                  and "sandbox" in (hd6.get("content-security-policy") or ""),
+                  str(hd6.get("content-security-policy")))
+            check("bytes intact (so it still downloads usefully)", b6 == evil)
+
+            st7, _hd7, _b7 = req("GET", "/api/files/preview?path=evil.html", op=op2)
+            check("preview of active content refused with 415", st7 == 415, str(st7))
+
+            st8, _b8h, _b8 = req("GET", "/api/files/download?path=../.secret",
+                                 raw=True, op=op2)
+            check("path escape refused", st8 in (400, 403, 404), str(st8))
+
+        # ---- 6. RBAC: non-admin must not reach systemctl ----
+        print("\n[6] non-admin session vs /api/services")
         stc, _ = req2("GET", "/api/services")
         check("non-admin GET /api/services -> 403 (systemctl is admin-only)",
               stc == 403, str(stc))
@@ -306,6 +347,17 @@ def main():
         except subprocess.TimeoutExpired:
             proc.kill()
         fh.close()
+        # The slot home lives outside the temp dir (home_of hardcodes /home), so
+        # remove exactly what this script created and nothing else.
+        if created_home and slot_home is not None:
+            shutil.rmtree(slot_home, ignore_errors=True)
+            # mkdir(parents=True) can also have created /home itself. That always
+            # exists on Linux and by default does not on Windows, so drop it only
+            # when this script made it and it is now empty - rmdir refuses a
+            # non-empty directory, which keeps anything pre-existing untouched.
+            if created_home_parent:
+                with contextlib.suppress(OSError):
+                    slot_home.parent.rmdir()
 
     print("\n" + "=" * 62)
     if FAILS:
@@ -314,7 +366,15 @@ def main():
             print("   -", f)
         print(f"\nserver log: {logfile}")
         return 1
-    print("SMOKE PASS — real uvicorn boot + full security chain verified")
+    if SKIPS:
+        print(f"SMOKE INCOMPLETE: {len(SKIPS)} section(s) could not run")
+        for s in SKIPS:
+            print("   -", s)
+        print("\nEverything that did run passed, but this is not a green gate:")
+        print("the file-delivery chain went unexercised against a real server.")
+        print(f"\nserver log: {logfile}")
+        return 1
+    print("SMOKE PASS - real uvicorn boot + full security chain verified")
     print(f"(temp dir kept for inspection: {tmp})")
     return 0
 
