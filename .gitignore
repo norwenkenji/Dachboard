@@ -1,7 +1,11 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-.pytest-tmp/
+# `*` so an alternate --basetemp stays out of the tree too: on Windows the
+# default .pytest-tmp can get stuck in a pending-delete state (every access
+# returns WinError 5 until the holding handle closes, usually needing a reboot),
+# and the workaround is to run pytest with a different --basetemp.
+.pytest-tmp*/
 .venv/
 data/
 *.db
