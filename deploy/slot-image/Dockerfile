@@ -2,7 +2,7 @@
 # Admin rebuilds this ONE image for all slots (P3+); slot containers are
 # created from it, user data lives on per-slot volumes (never in the image).
 # Build on server: docker build -t dach-slot:latest deploy/slot-image/
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
